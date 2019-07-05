@@ -111,7 +111,7 @@ void setup() {
 }
 
 void loop() {
-  byte bufferATQA[2];
+  byte bufferATQA[2] = {0x00, 0x00};
   byte bufferSize = sizeof(bufferATQA);
   
   StatusCode result = sendREQA(bufferATQA, &bufferSize); 
