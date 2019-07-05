@@ -156,25 +156,24 @@ byte readReg(byte addr) {
   return response;
 }
 
+/*
+* Using bit masks allow us to alter only specific bits in a binary value. 
+* This helps us preserve bits that may be settings and still change what we want.
+* 
+* See antennas for a good usage of this.
+*/
 
- /*
-  * Using bit masks allow us to alter only specific bits in a binary value. 
-  * This helps us preserve bits that may be settings and still change what we want.
-  * 
-  * See antennas for a good usage of this.
-  */
 
-
- /*
-  * Alters a register's value such that the values selected in the mask are turned off 
-  */
+/*
+* Alters a register's value such that the values selected in the mask are turned off 
+*/
 void clearRegBitMask(byte addr, byte mask) {
   writeReg(addr, readReg(addr) & (~mask));
 }
 
- /*
-  * Alters a register's value such that the values selected in the mask are turned on 
-  */
+/*
+* Alters a register's value such that the values selected in the mask are turned on 
+*/
 void setRegBitMask(byte addr, byte mask) {
   writeReg(addr, readReg(addr) | mask);
 }
@@ -237,7 +236,7 @@ StatusCode executeDataCommand(MFRC522Command cmd, byte successIrqFlag, byte *sen
   // Execute command
   writeReg(CommandReg, cmd); 
 
-  // Typically, commands that need data will immediately process FIFO, except for Transcieve:
+  // Typically, commands that need data will immediately process FIFO, except for Transceive:
   // 10.2 "Transceive command. Using this command, transmission is started with the BitFramingReg register’s StartSend bit."
   if(cmd == Transceive)
     setRegBitMask(BitFramingReg, B10000000); // StartSend = 1
@@ -251,9 +250,9 @@ StatusCode executeDataCommand(MFRC522Command cmd, byte successIrqFlag, byte *sen
     //  b7 . b6 .  b5 .  b4 .    b3 .       b2 .       b1 .   b0
     byte markedIrqFlags = readReg(ComIrqReg); 
     
-    if (markedIrqFlags & successIrqFlag) { // The sensor is reporting that the command we wanted was successful 
+    if (markedIrqFlags & successIrqFlag) // The sensor is reporting that the command we wanted was successful 
       break;
-    }
+    
 
     if (markedIrqFlags & B00000001) // 8.4.1 TimeIrq is fired when the timer is decremented from 1 to 0
       return STATUS_TIMEOUT; // According to miguelbalboa, this happens after 25ms. I don't see that in the documentation, so it is probably experimentally determined.
@@ -274,9 +273,9 @@ StatusCode executeDataCommand(MFRC522Command cmd, byte successIrqFlag, byte *sen
   if (backData && backLen) {
     byte fifoByteCount = readReg(FIFOLevelReg); 
     
-    if (fifoByteCount > *backLen) {
+    if (fifoByteCount > *backLen)
       return STATUS_NO_ROOM;
-    }
+    
     
     *backLen = fifoByteCount;
     
