@@ -46,6 +46,9 @@ enum MFRC522Register : byte {
   TxControlReg    = 0x14 << 1, // 9.3.2.5  | Controls antenna driver pins
   TxASKReg        = 0x15 << 1, // 9.3.2.6  | Amplitude Shift Keyed modulation setting
   TModeReg        = 0x2A << 1, // 9.3.3.10 | Timer settings
+  TPrescalerReg   = 0x2B << 1, // 9.3.3.10 | Timer prescaler (how many cycles of input clock do we count as a single tick)
+  TReloadRegH     = 0x2C << 1, // 9.3.3.11 | Timer reload value higher bits. When the timer hits 0, these are the higher 8 bits for the 16 bit value we start at.
+  TReloadRegL     = 0x2D << 1, // 9.3.3.11 | Timer reload value lower bits. When the timer hits 0, these are the lower 8 bits for the 16 bit value we start at.
   VersionReg      = 0x37 << 1, // 9.3.4.8  | Returns software version
 };
 
@@ -78,7 +81,6 @@ enum TagCommand : byte {
   PICC_CMD_REQA   = 0x26, // REQuest command, Type A. Invites PICCs in state IDLE to go to READY and prepare for anticollision or selection. 7 bit frame.
 };
 
-
 void setup() {
   initReader();
 
@@ -93,21 +95,19 @@ void setup() {
   
   softReset();
 
-  // TODO: Set a PICC timeout
   writeReg(TModeReg, B10000000); // Instructs internal timing unit to begin at the end of tramission (TAuto = 1)
+  // Lets set the timer to be a countdown for 25 milliseconds.
+  // Equation (5) states that t_d1 = timer_period * ticks, where ticks is TReloadVal+1. Thus, timer_period = (TPrescaler*2+1)/(13.56 MHz).
+  // To make it easy, lets just have the period be 25 microseconds, and then have 1000 ticks (reload value) to make our timer be 25 miliseconds.
+  writeReg(TPrescalerReg, 0xA9); // For a timer_period of 25μs, we need a TPrescaler of ( 25μs*13.56MHz - 1 )/2 = 169 = 0xA9 (solved using the timer_period equation)
+  writeReg(TReloadRegH, 0x03);   // By reloading the timer with 0x3E8 = 1000, we effectively have 1000 ticks of our timer before we hit 0. 
+  writeReg(TReloadRegL, 0xE8);
 
   writeReg(TxASKReg, B01000000); // Type A uses 100 % ASK modulation (see https://www.rfwireless-world.com/Terminology/10-ASK-modulation-vs-100-ASK-modulation.html). This register value forces 100 % ASK modulation.
   
   // TODO: Alter CRC coprocessor preset value
-
-
-  enableAntennas(); // Antennas are disabled by a soft reset
   
-/* miguelbolboa appears to reset these occasionally, so if something goes wrong maybe ensure these are at def values??
-  Serial.println(readReg(0x12 << 1), HEX); // tx baud  -> 0h
-  Serial.println(readReg(0x13 << 1), HEX); // rx baud  -> 0h
-  Serial.println(readReg(0x24 << 1), HEX); // modwidth setting? -> 26h
-*/
+  enableAntennas(); // Antennas are disabled by a soft reset
 }
 
 void loop() {
@@ -240,6 +240,8 @@ StatusCode executeDataCommand(MFRC522Command cmd, byte successIrqFlag, byte *sen
   // 10.2 "Transceive command. Using this command, transmission is started with the BitFramingReg register’s StartSend bit."
   if(cmd == Transceive)
     setRegBitMask(BitFramingReg, B10000000); // StartSend = 1
+
+  // Since we set TAuto = 1, the Timer unit has started now that transmission is over.
   
   // From my tests, on an Arduino Nano lit takes ~20 microseconds to perform a register read and 2 bit comparison operations
   uint16_t i;
@@ -255,7 +257,7 @@ StatusCode executeDataCommand(MFRC522Command cmd, byte successIrqFlag, byte *sen
     
 
     if (markedIrqFlags & B00000001) // 8.4.1 TimeIrq is fired when the timer is decremented from 1 to 0
-      return STATUS_TIMEOUT; // According to miguelbalboa, this happens after 25ms. I don't see that in the documentation, so it is probably experimentally determined.
+      return STATUS_TIMEOUT; // Since the entire timer has finished, we know the time elapsed is 25 ms. See where we configure the timer during initialization for an explanation.
   }
 
   clearRegBitMask(BitFramingReg, B10000000); // Stop forcing data transmission
