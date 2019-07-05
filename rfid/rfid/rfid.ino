@@ -229,6 +229,11 @@ StatusCode executeDataCommand(MFRC522Command cmd, byte successIrqFlag, byte *sen
   for (int i = 0; i < sendLen; i++) 
     writeReg(FIFODataReg, sendData[i]);    
 
+
+  // Frame adjustment for BitFramingReg
+  byte txLastBits = validBitsInLastByte ? *validBitsInLastByte : 0;
+  writeReg(BitFramingReg, txLastBits);
+  
   // Execute command
   writeReg(CommandReg, cmd); 
 
