@@ -1,15 +1,18 @@
 #include <SPI.h>
 
 /*
-   This program is written by Neil Johari in an attempt to simplify the RFID library into a few important function calls to the MFRC522.
+   This program is written by Neil Johari in an attempt to simplify the RFID
+   library into a few important function calls to the MFRC522.
    
-   The goal is to interact with an MF1 IC S50 card, which is compliant with parts 2 and 3 of the ISO/IEC 14443A. Thus, we only implement
-   Type A anticollision in this program.
+   The goal is to interact with an MF1 IC S50 card, which is compliant with
+   parts 2 and 3 of the ISO/IEC 14443A. Thus, we only implement Type A
+   anticollision in this program.
 
    For any real control over the sensor, please see miguelbalboa/rfid (GitHub)
 
-   This program has two main parts: Basic interaction with MFRC522 according to the datasheet, and then implementation of commands to
-   allow the sensor to interact with the MF1 IC S50.
+   This program has two main parts: Basic interaction with MFRC522 according to
+   the datasheet, and then implementation of commands to allow the sensor to
+   interact with the MF1 IC S50.
 
    Useful reading:
    - http://xionghuilin.com/iso-iec-14443-type-ab-summary/
@@ -24,15 +27,18 @@
 
 
 // 8.1.2 "The interface can handle data speeds up to 10 Mbit/s." -> 10MHz SPI clock speed
-// 8.1.2 "Data bytes on both MOSI and MISO lines are sent with the MSB first" -> Most Significant Byte First
-// 8.1.2 "Data on both MOSI and MISO lines must be stable on the rising edge of the clock" -> We should sample when stable via SPI Mode 0
+// 8.1.2 "Data bytes on both MOSI and MISO lines are sent with the MSB first" 
+// 8.1.2 "Data on both MOSI and MISO lines must be stable on the rising edge of
+//       the clock" -> We should sample when stable via SPI Mode 0
+
 const SPISettings SPI_CONFIG(10000000, MSBFIRST, SPI_MODE0);
 
 
 enum MFRC522Register : byte {
   // 8.1.2.3 "The MSB of the first byte defines the mode used."
   // 8.1.2.3 "LSB is set to logic 0."
-  // Thus, the address bits must be within bits 6 to 0, so we shift everything over by 1 bit
+  // Thus, the address bits must be within bits 6 to 0, so we shift everything
+  // over by 1 bit
   
   //ComIEnReg     = 0x02 << 1, // 9.3.1.3  | Controls which events trigger IRQ pin * IRQ NOT SUPPORTED BY HARDWARE (PIN GOES TO NOTHING)
   CommandReg      = 0x01 << 1, // 9.3.1.2  | Sends a command to the sensor; Commands are described in 10.3
@@ -95,15 +101,29 @@ void setup() {
   
   softReset();
 
-  writeReg(TModeReg, B10000000); // Instructs internal timing unit to begin at the end of tramission (TAuto = 1)
-  // Lets set the timer to be a countdown for 25 milliseconds.
-  // Equation (5) states that t_d1 = timer_period * ticks, where ticks is TReloadVal+1. Thus, timer_period = (TPrescaler*2+1)/(13.56 MHz).
-  // To make it easy, lets just have the period be 25 microseconds, and then have 1000 ticks (reload value) to make our timer be 25 miliseconds.
-  writeReg(TPrescalerReg, 0xA9); // For a timer_period of 25μs, we need a TPrescaler of ( 25μs*13.56MHz - 1 )/2 = 169 = 0xA9 (solved using the timer_period equation)
-  writeReg(TReloadRegH, 0x03);   // By reloading the timer with 0x3E8 = 1000, we effectively have 1000 ticks of our timer before we hit 0. 
+  writeReg(TModeReg, B10000000); // Start timer at end of tramission (TAuto = 1)
+
+
+  /*
+     Lets set the timer to be a countdown for 25 milliseconds.  Equation (5)
+     states that t_d1 = timer_period * ticks, where ticks is TReloadVal+1. 
+
+     Thus, timer_period = (TPrescaler*2+1)/(13.56 MHz).  To make it easy, lets
+     just have the period be 25 microseconds, and then have 1000 ticks (reload
+     value) to make our timer be 25 miliseconds.
+   */
+  
+  // For a timer_period of 25μs, we need a TPrescaler of ( 25μs*13.56MHz - 1 )/2 =
+  //  169 = 0xA9 (solved using the timer_period equation)
+  writeReg(TPrescalerReg, 0xA9); 
+  // By reloading the timer with 0x3E8 = 1000, we effectively have 1000 ticks of
+  // our timer before we hit 0. writeReg(TReloadRegH, 0x03);   
   writeReg(TReloadRegL, 0xE8);
 
-  writeReg(TxASKReg, B01000000); // Type A uses 100 % ASK modulation (see https://www.rfwireless-world.com/Terminology/10-ASK-modulation-vs-100-ASK-modulation.html). This register value forces 100 % ASK modulation.
+  // Type A uses 100 % ASK modulation (see
+  // https://www.rfwireless-world.com/Terminology/10-ASK-modulation-vs-100-ASK-modulation.html).
+  // This register value forces 100 % ASK modulation
+  writeReg(TxASKReg, B01000000); 
   
   // TODO: Alter CRC coprocessor preset value
   
@@ -127,9 +147,15 @@ void writeReg(byte addr, byte val) {
 
   digitalWrite(SS, LOW); // Choose slave
 
-  // 8.1.2.3 "The MSB of the first byte defines the mode used. ...  To write data to the MFRC522 the MSB must be set to logic 0."
-  // 8.1.2.3 "LSB is set to logic 0."
-  // We could just pass in the address formatted correctly (and we should), but this helps ensure we are in writing mode
+  /*
+  8.1.2.3 "The MSB of the first byte defines the mode used. ...  To write
+  data to the MFRC522 the MSB must be set to logic 0." 
+  8.1.2.3 "LSB is set to logic 0."
+
+  We could just pass in the address formatted correctly (and we should), but
+  this helps ensure we are in writing mode
+  */
+
   SPI.transfer(B01111110 & addr);
 
   SPI.transfer(val);
@@ -145,7 +171,8 @@ byte readReg(byte addr) {
 
   digitalWrite(SS, LOW); // Choose slave
 
-  // 8.1.2.3 "The MSB of the first byte defines the mode used. To read data from the MFRC522 the MSB is set to logic 1. "
+  // 8.1.2.3 "The MSB of the first byte defines the mode used. To read data from
+  // the MFRC522 the MSB is set to logic 1. "
   SPI.transfer(B10000000 | addr);
 
   byte response = SPI.transfer(0);
@@ -157,22 +184,24 @@ byte readReg(byte addr) {
 }
 
 /*
-* Using bit masks allow us to alter only specific bits in a binary value. 
-* This helps us preserve bits that may be settings and still change what we want.
+* Using bit masks allow us to alter only specific bits in a binary value.  This
+* helps us preserve bits that may be settings and still change what we want.
 * 
 * See antennas for a good usage of this.
 */
 
 
 /*
-* Alters a register's value such that the values selected in the mask are turned off 
+* Alters a register's value such that the values selected in the mask are turned
+* off 
 */
 void clearRegBitMask(byte addr, byte mask) {
   writeReg(addr, readReg(addr) & (~mask));
 }
 
 /*
-* Alters a register's value such that the values selected in the mask are turned on 
+* Alters a register's value such that the values selected in the mask are turned
+* on 
 */
 void setRegBitMask(byte addr, byte mask) {
   writeReg(addr, readReg(addr) | mask);
@@ -187,16 +216,18 @@ void initReader() {
 
 void softReset() {
   writeReg(CommandReg, SoftReset);
-  delay(150); // Far above maximum sensor boot time. Can be made more efficient by doing checks on CommandReg PowerDown bit 
+  delay(150); // Give plenty of time for oscillator to boot up 
 }
 
 void enableAntennas() {
-  // Table 62 under 9.3.2.5: Last two bits control whether the antenna driver pins (TX1 and TX2) are on or off
+  // Table 62 under 9.3.2.5: Last two bits control whether the antenna driver
+  //  pins (TX1 and TX2) are on or off
   setRegBitMask(TxControlReg, B11);
 }
 
 void disableAntennas() {
-  // Table 62 under 9.3.2.5: Last two bits control whether the antenna driver pins (TX1 and TX2) are on or off
+  // Table 62 under 9.3.2.5: Last two bits control whether the antenna driver
+  //  pins (TX1 and TX2) are on or off
   clearRegBitMask(TxControlReg, B11);
 }
 
@@ -217,16 +248,21 @@ void clearLoggedCollisionBits() {
 }
 
 /*
- * Transfers data to FIFO buffer, executes command, and returns data back from the buffer. 
+ * Transfers data to FIFO buffer, executes command, and returns data back from
+ * the buffer. 
  */
-StatusCode executeDataCommand(MFRC522Command cmd, byte successIrqFlag, byte *sendData, byte sendLen, byte *backData, byte *backLen, byte *validBitsInLastByte) {
+StatusCode executeDataCommand(MFRC522Command cmd, byte successIrqFlag, 
+byte *sendData, byte sendLen, byte *backData, byte *backLen, 
+byte *validBitsInLastByte) { 
+
   writeReg(CommandReg, Idle); // Idle halts any currently running commands
   clearMarkedIRQBits();
   flushFIFOBuffer();
 
-  // 8.3.1 "Writing to this register stores one byte in the FIFO buffer and increments the internal FIFO buffer write pointer"
+  // 8.3.1 "Writing to this register stores one byte in the FIFO buffer and
+  //  increments the internal FIFO buffer write pointer"
   for (int i = 0; i < sendLen; i++) 
-    writeReg(FIFODataReg, sendData[i]);    
+        writeReg(FIFODataReg, sendData[i]);    
 
 
   // Frame adjustment for BitFramingReg
@@ -236,14 +272,17 @@ StatusCode executeDataCommand(MFRC522Command cmd, byte successIrqFlag, byte *sen
   // Execute command
   writeReg(CommandReg, cmd); 
 
-  // Typically, commands that need data will immediately process FIFO, except for Transceive:
-  // 10.2 "Transceive command. Using this command, transmission is started with the BitFramingReg register’s StartSend bit."
+  // Typically, commands that need data will immediately process FIFO, except
+  //  for Transceive: 10.2 "Transceive command. Using this command, transmission
+  //  is started with the BitFramingReg register’s StartSend bit."
   if(cmd == Transceive)
     setRegBitMask(BitFramingReg, B10000000); // StartSend = 1
 
-  // Since we set TAuto = 1, the Timer unit has started now that transmission is over.
+  // Since we set TAuto = 1, the Timer unit has started now that transmission is
+  //  over.
   
-  // From my tests, on an Arduino Nano lit takes ~20 microseconds to perform a register read and 2 bit comparison operations
+  // From my tests, on an Arduino Nano lit takes ~20 microseconds to perform a
+  //  register read and 2 bit comparison operations
   uint16_t i;
   for (i = 2000; i > 0; i--) {
 
@@ -252,17 +291,23 @@ StatusCode executeDataCommand(MFRC522Command cmd, byte successIrqFlag, byte *sen
     //  b7 . b6 .  b5 .  b4 .    b3 .       b2 .       b1 .   b0
     byte markedIrqFlags = readReg(ComIrqReg); 
     
-    if (markedIrqFlags & successIrqFlag) // The sensor is reporting that the command we wanted was successful 
+    if (markedIrqFlags & successIrqFlag) // Command successful 
       break;
     
-
-    if (markedIrqFlags & B00000001) // 8.4.1 TimeIrq is fired when the timer is decremented from 1 to 0
-      return STATUS_TIMEOUT; // Since the entire timer has finished, we know the time elapsed is 25 ms. See where we configure the timer during initialization for an explanation.
+    // 8.4.1 TimeIrq is fired when the timer is decremented from 1 to 0
+    // Since the entire timer has finished, we know the time elapsed is 25 ms.
+    // See where we configure the timer during initialization for an
+    //  explanation.
+    if (markedIrqFlags & B00000001) 
+      return STATUS_TIMEOUT; 
   }
 
   clearRegBitMask(BitFramingReg, B10000000); // Stop forcing data transmission
 
-  if (i == 0) // 20 microseconds * 2000 = 40 ms elapsed and we didn't get a successful flag or even a timer timeout. Probably means we can't communicate with the sensor anymore.
+  // 20 microseconds * 2000 = 40 ms elapsed and we didn't get a successful flag
+  //  or even a timer timeout. 
+  // Probably means we can't communicate with the sensor anymore.
+  if (i == 0) 
     return STATUS_TIMEOUT;
   
 
@@ -285,7 +330,8 @@ StatusCode executeDataCommand(MFRC522Command cmd, byte successIrqFlag, byte *sen
       backData[i] = readReg(FIFODataReg);  
 
     // Some of the data in the last byte might not actually be part of the data we want.
-    // ControlReg.RxLastBits (b2 to b0) indicates the number of valid bits in the last byte, "if this value is 000b, the whole byte is valid"
+    // ControlReg.RxLastBits (b2 to b0) indicates the number of valid bits in
+    //  the last byte, "if this value is 000b, the whole byte is valid"
     if (validBitsInLastByte) 
       *validBitsInLastByte = readReg(ControlReg) & B00000111; // extracts the last 3 bits 
   }
@@ -307,8 +353,10 @@ StatusCode sendREQA(byte *bufferATQA, byte *bufferSize) {
     return STATUS_NO_ROOM;
 
   clearLoggedCollisionBits();
-
-  uint8_t validBits = 7;                  // For REQA and WUPA we need the short frame format - transmit only 7 bits of the last (and only) byte. TxLastBits = BitFramingReg[2..0]
+  
+  // REQA and WUPA are specially crafted to only be 7 bits
+  // so that they can't be confused for any other command.
+  uint8_t validBits = 7;                  
 
   byte command = PICC_CMD_REQA;
   StatusCode status = executeDataCommand(Transceive, B01110000, &command, 1, bufferATQA, bufferSize, &validBits);
