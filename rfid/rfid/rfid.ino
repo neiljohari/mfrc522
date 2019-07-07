@@ -49,6 +49,7 @@ enum MFRC522Register : byte {
   ControlReg      = 0x0C << 1, // 9.3.1.13 | Miscallaneous control bits; we use it to figure out # of valid bits in a byte at the end of a frame
   BitFramingReg   = 0x0D << 1, // 9.3.1.14 | Bit-oriented frame settings (we don't adjust frame settings, we only touch the StartSend bit which can force data transmission)
   CollReg         = 0x0E << 1, // 9.3.1.15 | First bit collision detected
+  ModeReg         = 0x11 << 1, // 9.3.2.2  | TX and RX settings. We change the CRC coprocessor preset value.
   TxControlReg    = 0x14 << 1, // 9.3.2.5  | Controls antenna driver pins
   TxASKReg        = 0x15 << 1, // 9.3.2.6  | Amplitude Shift Keyed modulation setting
   TModeReg        = 0x2A << 1, // 9.3.3.10 | Timer settings
@@ -84,7 +85,7 @@ enum StatusCode : byte {
 };
 
 enum TagCommand : byte {
-  PICC_CMD_REQA   = 0x26, // REQuest command, Type A. Invites PICCs in state IDLE to go to READY and prepare for anticollision or selection. 7 bit frame.
+  PICC_CMD_REQA   = 0x26 // REQuest command, Type A. Invites PICCs in state IDLE to go to READY and prepare for anticollision or selection. 7 bit frame.
 };
 
 void setup() {
@@ -124,18 +125,20 @@ void setup() {
   // https://www.rfwireless-world.com/Terminology/10-ASK-modulation-vs-100-ASK-modulation.html).
   // This register value forces 100 % ASK modulation
   writeReg(TxASKReg, B01000000); 
-  
-  // TODO: Alter CRC coprocessor preset value
+
+  // According to ISO/IEC 14443-3 6.1.6, "the initial register content shall be '6363'" w.r.t. the CRC coprocessor preset value
+  // This register's last 2 bits determine the preset value. By default the register is 0x3F, we want the last values to be 01
+  //  so we use 0x3D
+  writeReg(ModeReg, 0x3D);
   
   enableAntennas(); // Antennas are disabled by a soft reset
 }
 
 void loop() {
-  byte bufferATQA[2] = {0x00, 0x00};
-  byte bufferSize = sizeof(bufferATQA);
-  
-  StatusCode result = sendREQA(bufferATQA, &bufferSize); 
-  Serial.println(bufferATQA[1]);
+  if(!isNewCardPresent())
+    return;
+
+  Serial.println("New card detected");
   delay(100);
 }
 
@@ -251,24 +254,24 @@ void clearLoggedCollisionBits() {
  * Transfers data to FIFO buffer, executes command, and returns data back from
  * the buffer. 
  */
-StatusCode executeDataCommand(MFRC522Command cmd, byte successIrqFlag, 
-byte *sendData, byte sendLen, byte *backData, byte *backLen, 
-byte *validBitsInLastByte) { 
-
+StatusCode executeDataCommand(byte cmd, byte successIrqFlag, 
+                              byte *sendData, byte sendLen, byte *backData, 
+                              byte *backLen, byte *validBitsInLastByte) { 
   writeReg(CommandReg, Idle); // Idle halts any currently running commands
   clearMarkedIRQBits();
   flushFIFOBuffer();
-
+  
   // 8.3.1 "Writing to this register stores one byte in the FIFO buffer and
   //  increments the internal FIFO buffer write pointer"
-  for (int i = 0; i < sendLen; i++) 
-        writeReg(FIFODataReg, sendData[i]);    
+  for (int i = 0; i < sendLen; i++) {
+    writeReg(FIFODataReg, sendData[i]);    
+  }
 
 
   // Frame adjustment for BitFramingReg
   byte txLastBits = validBitsInLastByte ? *validBitsInLastByte : 0;
   writeReg(BitFramingReg, txLastBits);
-  
+
   // Execute command
   writeReg(CommandReg, cmd); 
 
@@ -281,7 +284,7 @@ byte *validBitsInLastByte) {
   // Since we set TAuto = 1, the Timer unit has started now that transmission is
   //  over.
   
-  // From my tests, on an Arduino Nano lit takes ~20 microseconds to perform a
+  // From my tests, on an Arduino Nano it takes ~20 microseconds to perform a
   //  register read and 2 bit comparison operations
   uint16_t i;
   for (i = 2000; i > 0; i--) {
@@ -325,7 +328,7 @@ byte *validBitsInLastByte) {
     
     
     *backLen = fifoByteCount;
-    
+
     for (int i = 0; i < fifoByteCount; i++) 
       backData[i] = readReg(FIFODataReg);  
 
@@ -363,9 +366,17 @@ StatusCode sendREQA(byte *bufferATQA, byte *bufferSize) {
 
   if (status != STATUS_OK) 
     return status;
-  
+
   if (*bufferSize != 2 || validBits != 0)    // ATQA must be exactly 16 bits.
     return STATUS_ERROR;
   
   return STATUS_OK;
+}
+
+bool isNewCardPresent() {
+  byte bufferATQA[2] = {0x00, 0x00};
+  byte bufferSize = sizeof(bufferATQA);
+  
+  StatusCode result = sendREQA(bufferATQA, &bufferSize); 
+  return (result == STATUS_OK || result == STATUS_COLLISION);
 }
