@@ -89,10 +89,22 @@ enum TagCommand : byte {
 };
 
 void setup() {
-  initReader();
-
-
   Serial.begin(9600);
+  initReader();
+}
+
+void loop() {
+  if(!isNewCardPresent())
+    return;
+
+  Serial.println("New card detected");
+  delay(100);
+}
+
+void initReader() {
+  pinMode(SS, OUTPUT); // SS defined in pins_arduino.h
+  digitalWrite(SS, HIGH);
+
   SPI.begin();
 
   // 9.3.4.8
@@ -132,14 +144,6 @@ void setup() {
   writeReg(ModeReg, 0x3D);
   
   enableAntennas(); // Antennas are disabled by a soft reset
-}
-
-void loop() {
-  if(!isNewCardPresent())
-    return;
-
-  Serial.println("New card detected");
-  delay(100);
 }
 
 
@@ -209,13 +213,6 @@ void clearRegBitMask(byte addr, byte mask) {
 void setRegBitMask(byte addr, byte mask) {
   writeReg(addr, readReg(addr) | mask);
 }
-
-
-void initReader() {
-  pinMode(SS, OUTPUT); // SS defined in pins_arduino.h
-  digitalWrite(SS, HIGH);
-}
-
 
 void softReset() {
   writeReg(CommandReg, SoftReset);
