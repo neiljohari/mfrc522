@@ -94,11 +94,8 @@ void setup() {
 }
 
 void loop() {
-  if(!isNewCardPresent())
-    return;
-
-  Serial.println("New card detected");
-  delay(100);
+  if(isNewCardPresent())
+    Serial.println("New card detected");
 }
 
 void initReader() {
@@ -317,9 +314,11 @@ StatusCode executeDataCommand(byte cmd, byte successIrqFlag,
   if(readReg(ErrorReg) & B00010011) // BufferOvfl, ParityErr, and ProtocolErr
     return STATUS_ERROR;
 
+  // Serial.println(readReg(ErrorReg),BIN);
+
   if (backData && backLen) {
     byte fifoByteCount = readReg(FIFOLevelReg); 
-    
+
     if (fifoByteCount > *backLen)
       return STATUS_NO_ROOM;
     
@@ -335,12 +334,12 @@ StatusCode executeDataCommand(byte cmd, byte successIrqFlag,
     if (validBitsInLastByte) 
       *validBitsInLastByte = readReg(ControlReg) & B00000111; // extracts the last 3 bits 
   }
+
   
   if (readReg(ErrorReg) & B00001000)  // CollErr, see ErrorReg return bits comment above
     return STATUS_COLLISION;
-
+    
   return STATUS_OK;
-  
 }
 
 /*
@@ -359,11 +358,11 @@ StatusCode sendREQA(byte *bufferATQA, byte *bufferSize) {
   uint8_t validBits = 7;                  
 
   byte command = PICC_CMD_REQA;
-  StatusCode status = executeDataCommand(Transceive, B01110000, &command, 1, bufferATQA, bufferSize, &validBits);
+  StatusCode status = executeDataCommand(Transceive, B00110000, &command, 1, bufferATQA, bufferSize, &validBits);
 
   if (status != STATUS_OK) 
     return status;
-
+    
   if (*bufferSize != 2 || validBits != 0)    // ATQA must be exactly 16 bits.
     return STATUS_ERROR;
   
@@ -371,9 +370,9 @@ StatusCode sendREQA(byte *bufferATQA, byte *bufferSize) {
 }
 
 bool isNewCardPresent() {
-  byte bufferATQA[2] = {0x00, 0x00};
+  byte bufferATQA[2];
   byte bufferSize = sizeof(bufferATQA);
-  
+   
   StatusCode result = sendREQA(bufferATQA, &bufferSize); 
   return (result == STATUS_OK || result == STATUS_COLLISION);
 }
