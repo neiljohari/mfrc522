@@ -47,7 +47,7 @@ enum MFRC522Register : byte {
   FIFODataReg     = 0x09 << 1, // 9.3.1.10 | I/O for FIFO buffer
   FIFOLevelReg    = 0x0A << 1, // 9.3.1.11 | Indicates # bytes in FIFO buffer, also can clear buffer
   ControlReg      = 0x0C << 1, // 9.3.1.13 | Miscallaneous control bits; we use it to figure out # of valid bits in a byte at the end of a frame
-  BitFramingReg   = 0x0D << 1, // 9.3.1.14 | Bit-oriented frame settings (we don't adjust frame settings, we only touch the StartSend bit which can force data transmission)
+  BitFramingReg   = 0x0D << 1, // 9.3.1.14 | Bit-oriented frame settings. Used for adjusting # of valid bits in a frame, and for forcing transmission start using StartSend
   CollReg         = 0x0E << 1, // 9.3.1.15 | First bit collision detected
   ModeReg         = 0x11 << 1, // 9.3.2.2  | TX and RX settings. We change the CRC coprocessor preset value.
   TxControlReg    = 0x14 << 1, // 9.3.2.5  | Controls antenna driver pins
