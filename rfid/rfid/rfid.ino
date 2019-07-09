@@ -85,7 +85,8 @@ enum StatusCode : byte {
 };
 
 enum TagCommand : byte {
-  PICC_CMD_REQA   = 0x26 // REQuest command, Type A. Invites PICCs in state IDLE to go to READY and prepare for anticollision or selection. 7 bit frame.
+  PICC_CMD_REQA   = 0x26, // REQuest command, Type A. Invites PICCs in state IDLE to go to READY and prepare for anticollision or selection. 7 bit frame.
+  PICC_SEL_CL1    = 0x93  // SEL command for cascade level 1
 };
 
 void setup() {
@@ -94,8 +95,17 @@ void setup() {
 }
 
 void loop() {
-  if(isNewCardPresent())
-    Serial.println("New card detected");
+  if(isNewCardPresent()) {
+    byte serNum[5] = {0x00, 0x00, 0x00, 0x00, 0x00};
+
+    StatusCode anticollisionStatus = performAnticollision(serNum);
+
+    if(anticollisionStatus == STATUS_OK) {
+      char uid[11];
+      sprintf(uid,"%02X:%02X:%02X:%02X", serNum[0], serNum[1], serNum[2], serNum[3]);
+      Serial.println(uid);
+    }
+  }
 }
 
 void initReader() {
@@ -275,10 +285,10 @@ StatusCode executeDataCommand(byte cmd, byte successIrqFlag,
   //  is started with the BitFramingReg register’s StartSend bit."
   if(cmd == Transceive)
     setRegBitMask(BitFramingReg, B10000000); // StartSend = 1
-
+    
   // Since we set TAuto = 1, the Timer unit has started now that transmission is
   //  over.
-  
+    
   // From my tests, on an Arduino Nano it takes ~20 microseconds to perform a
   //  register read and 2 bit comparison operations
   uint16_t i;
@@ -288,7 +298,7 @@ StatusCode executeDataCommand(byte cmd, byte successIrqFlag,
     //  Set1 TxIRq RxIRq IdleIRq HiAlertIRq LoAlertIRq ErrIRq TimerIRq
     //  b7 . b6 .  b5 .  b4 .    b3 .       b2 .       b1 .   b0
     byte markedIrqFlags = readReg(ComIrqReg); 
-    
+
     if (markedIrqFlags & successIrqFlag) // Command successful 
       break;
     
@@ -307,22 +317,18 @@ StatusCode executeDataCommand(byte cmd, byte successIrqFlag,
   // Probably means we can't communicate with the sensor anymore.
   if (i == 0) 
     return STATUS_TIMEOUT;
-  
 
   // ErrorReg return bits:
   //  WrErr TempErr reserved BufferOvfl CollErr CRCErr ParityErr ProtocolErr
   //  b7 .  b6 .    b5 .     b4 .       b3 .    b2 .   b1 .      b0
   if(readReg(ErrorReg) & B00010011) // BufferOvfl, ParityErr, and ProtocolErr
     return STATUS_ERROR;
-
-  // Serial.println(readReg(ErrorReg),BIN);
-
+    
   if (backData && backLen) {
     byte fifoByteCount = readReg(FIFOLevelReg); 
 
-    if (fifoByteCount > *backLen)
+    if (fifoByteCount > *backLen) 
       return STATUS_NO_ROOM;
-    
     
     *backLen = fifoByteCount;
 
@@ -339,7 +345,7 @@ StatusCode executeDataCommand(byte cmd, byte successIrqFlag,
   
   if (readReg(ErrorReg) & B00001000)  // CollErr, see ErrorReg return bits comment above
     return STATUS_COLLISION;
-    
+
   return STATUS_OK;
 }
 
@@ -373,7 +379,42 @@ StatusCode sendREQA(byte *bufferATQA, byte *bufferSize) {
 bool isNewCardPresent() {
   byte bufferATQA[2];
   byte bufferSize = sizeof(bufferATQA);
-   
+  
   StatusCode result = sendREQA(bufferATQA, &bufferSize); 
+  
   return (result == STATUS_OK || result == STATUS_COLLISION);
+}
+
+/*
+ * This is a very basic naive implementation of anticollision.
+ * 
+ * It does not handle bit collisions, nor does it escalate cascade levels to retrieve a UID larger than type single. 
+ * Additionally, it does not verify that we have received the SAK (Select AcKnowledge) frame which would indicate a full UID.
+ */
+StatusCode performAnticollision(byte *serialNumber) {
+  byte cmdFrame[2]; // Allocate 2 byte command frame for the PCD to transmit
+  cmdFrame[0] = PICC_SEL_CL1; // SEL for cascade level 1
+  cmdFrame[1] = 0x20; // NVB = 20. "This value defines that the PCD will transmit no part of UID CLn" (ISO/IEC 14443-3)
+
+  uint8_t validBits = 0; // Transmit all bits of NVB frame
+  uint8_t backLen = 5; // We expect the following bytes to come back: uid0, uid1, uid2, uid3, BCC
+  
+  StatusCode status = executeDataCommand(Transceive, B00110000, cmdFrame, 2, serialNumber, &backLen, &validBits);
+
+  // The command was successful, now lets use the BCC checksum to verify the integrity of our UID chunk
+  // BCC is "UID CLn check byte, calculated as exclusive-or over the 4 previous bytes, Type A" (ISO/IEC 14443-3)
+  if (status == STATUS_OK) {
+    byte uid0 = serialNumber[0];
+    byte uid1 = serialNumber[1];
+    byte uid2 = serialNumber[2];
+    byte uid3 = serialNumber[3];
+    byte BCC  = serialNumber[4];
+    
+    byte checksum = uid0 ^ uid1 ^ uid2 ^ uid3;
+
+    if(checksum != BCC)
+      return STATUS_ERROR; 
+  }
+  
+  return status;
 }
