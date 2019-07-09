@@ -127,7 +127,8 @@ void initReader() {
   //  169 = 0xA9 (solved using the timer_period equation)
   writeReg(TPrescalerReg, 0xA9); 
   // By reloading the timer with 0x3E8 = 1000, we effectively have 1000 ticks of
-  // our timer before we hit 0. writeReg(TReloadRegH, 0x03);   
+  // our timer before we hit 0. 
+  writeReg(TReloadRegH, 0x03);   
   writeReg(TReloadRegL, 0xE8);
 
   // Type A uses 100 % ASK modulation (see
