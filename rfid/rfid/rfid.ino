@@ -398,9 +398,10 @@ StatusCode performAnticollision(byte *serialNumber) {
 
   uint8_t validBits = 0; // Transmit all bits of NVB frame
   uint8_t backLen = 5; // We expect the following bytes to come back: uid0, uid1, uid2, uid3, BCC
-  
-  StatusCode status = executeDataCommand(Transceive, B00110000, cmdFrame, 2, serialNumber, &backLen, &validBits);
 
+  clearLoggedCollisionBits();
+  StatusCode status = executeDataCommand(Transceive, B00110000, cmdFrame, 2, serialNumber, &backLen, &validBits);
+    
   // The command was successful, now lets use the BCC checksum to verify the integrity of our UID chunk
   // BCC is "UID CLn check byte, calculated as exclusive-or over the 4 previous bytes, Type A" (ISO/IEC 14443-3)
   if (status == STATUS_OK) {
