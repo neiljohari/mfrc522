@@ -401,6 +401,14 @@ StatusCode performAnticollision(byte *serialNumber) {
 
   clearLoggedCollisionBits();
   StatusCode status = executeDataCommand(Transceive, B00110000, cmdFrame, 2, serialNumber, &backLen, &validBits);
+
+  // The last 4 bits of CollReg are the position of the bit collision, b5 is collision invalid/not detected
+  byte collisions = readReg(CollReg) & B00111111; 
+
+  if(!(collisions & B00100000)) { // If b5 is logic 0, a collision was detected
+    Serial.println("Collision detected, aborting anticollision process");
+    return STATUS_COLLISION;
+  }
     
   // The command was successful, now lets use the BCC checksum to verify the integrity of our UID chunk
   // BCC is "UID CLn check byte, calculated as exclusive-or over the 4 previous bytes, Type A" (ISO/IEC 14443-3)
