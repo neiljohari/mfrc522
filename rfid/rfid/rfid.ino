@@ -43,6 +43,7 @@ enum MFRC522Register : byte {
   //ComIEnReg     = 0x02 << 1, // 9.3.1.3  | Controls which events trigger IRQ pin * IRQ NOT SUPPORTED BY HARDWARE (PIN GOES TO NOTHING)
   CommandReg      = 0x01 << 1, // 9.3.1.2  | Sends a command to the sensor; Commands are described in 10.3
   ComIrqReg       = 0x04 << 1, // 9.3.1.5  | Interrupt request bits
+  DivIrqReg       = 0x05 << 1, // 9.3.1.6  | Interrupt request bits
   ErrorReg        = 0x06 << 1, // 9.3.1.7  | Error flags from last command executed 
   FIFODataReg     = 0x09 << 1, // 9.3.1.10 | I/O for FIFO buffer
   FIFOLevelReg    = 0x0A << 1, // 9.3.1.11 | Indicates # bytes in FIFO buffer, also can clear buffer
@@ -52,6 +53,8 @@ enum MFRC522Register : byte {
   ModeReg         = 0x11 << 1, // 9.3.2.2  | TX and RX settings. We change the CRC coprocessor preset value.
   TxControlReg    = 0x14 << 1, // 9.3.2.5  | Controls antenna driver pins
   TxASKReg        = 0x15 << 1, // 9.3.2.6  | Amplitude Shift Keyed modulation setting
+  CRCResultRegH   = 0x21 << 1, // 9.3.3.2  | CRC calculation result higher bits.
+  CRCResultRegL   = 0x22 << 1, // 9.3.3.2  | CRC calculation result lower bits.
   TModeReg        = 0x2A << 1, // 9.3.3.10 | Timer settings
   TPrescalerReg   = 0x2B << 1, // 9.3.3.10 | Timer prescaler (how many cycles of input clock do we count as a single tick)
   TReloadRegH     = 0x2C << 1, // 9.3.3.11 | Timer reload value higher bits. When the timer hits 0, these are the higher 8 bits for the 16 bit value we start at.
@@ -62,6 +65,7 @@ enum MFRC522Register : byte {
 enum MFRC522Command : byte { 
   // 10.3
   Idle            = B00000000, // 10.3.1.1  | Puts into Idle mode, halting all currently running commands.
+  CalcCRC_A        = B00000011, // 10.3.1.4  | Actives the CRC co-processor
   Transmit        = B00000100, // 10.3.1.5  | FIFO buffer is transmitted. Relevant registers must be set for data transmission.
   Receive         = B00001000, // 10.3.1.7  | Activates receiver and listens for data until frame end or exceeded length. If RxModeReg.RxMultiple = 1 then receive won't auto terminate. 
   Transceive      = B00001100, // 10.3.1.8  | Continuously repeat FIFO buffer transmit and then receive from field. 
@@ -69,7 +73,6 @@ enum MFRC522Command : byte {
                                //             This command must be cleared by writing any command to the CommandReg register.
                                //             If RxModeReg.RxMultiple = 1 then transcieve doesn't leave receive state.
   SoftReset       = B00001111, // 10.3.1.10 | Resets the MFRC522. Command automatically terminates. All registers are reset, internal memory unchanged.
-  
 };
 
 enum StatusCode : byte {
@@ -86,7 +89,7 @@ enum StatusCode : byte {
 
 enum TagCommand : byte {
   PICC_CMD_REQA   = 0x26, // REQuest command, Type A. Invites PICCs in state IDLE to go to READY and prepare for anticollision or selection. 7 bit frame.
-  PICC_SEL_CL1    = 0x93  // SEL command for cascade level 1
+  PICC_SEL_CL1    = 0x93,  // SEL command for cascade level 1
 };
 
 void setup() {
@@ -104,6 +107,8 @@ void loop() {
       char uid[11];
       sprintf(uid,"%02X:%02X:%02X:%02X", serNum[0], serNum[1], serNum[2], serNum[3]);
       Serial.println(uid);
+
+      selectCard(serNum);
     }
   }
 }
@@ -253,6 +258,43 @@ void clearMarkedIRQBits() {
 
 void clearLoggedCollisionBits() {
   clearRegBitMask(CollReg, B10000000); 
+}
+
+/*
+ * Uses the CRC Co-processor on the MFRC522 to compute a CRC type A checksum on a given block of data
+ * 
+ * This function takes in up to 64 bytes of data (size of the FIFO buffer), computes the checksum, and returns it in the result byte array.
+ * Note: the result of this function is 2 bytes, so the result byte pointer should allocate at least 2 bytes. 
+ */
+StatusCode calculateCRC_A(byte *data, byte dataLen, byte *result) {
+  writeReg(CommandReg, Idle); // Idle halts any currently running commands
+  writeReg(DivIrqReg, B00000100); // First bit indicates we want to clear marked bit, marked bit is CRC interrupt
+  flushFIFOBuffer();
+  // 8.3.1 "Writing to this register stores one byte in the FIFO buffer and
+  //  increments the internal FIFO buffer write pointer"
+  for (int i = 0; i < dataLen; i++) {
+    writeReg(FIFODataReg, data[i]);    
+  }
+  
+  writeReg(CommandReg, CalcCRC_A);
+  
+  long start = millis();
+
+  while(millis() < start + 100) {
+    byte markedIrqFlags = readReg(DivIrqReg);
+    // DivIrqReg return bits:
+    //  Set2 reserved reserved MfinActIRq reserved CRCIRq reserved reserved
+    //  b7   b6       b5       b4         b3       b2     b1       b0
+    
+    if(markedIrqFlags & B00000100) { // If the CRCIrq is set, the CRC coprocessor is done with our calculation
+      writeReg(CommandReg, Idle); // Idle halts any currently running commands
+      result[0] = readReg(CRCResultRegL);
+      result[1] = readReg(CRCResultRegH);
+      return STATUS_OK;
+    }
+  }
+  
+  return STATUS_TIMEOUT;
 }
 
 /*
@@ -426,4 +468,50 @@ StatusCode performAnticollision(byte *serialNumber) {
   }
   
   return status;
+}
+
+/*
+ * Given a complete Uid, this function will transition a PICC in the READY state to ACTIVE state
+ */
+StatusCode selectCard(byte *serialNumber) {
+   byte cmdFrame[9];
+   cmdFrame[0] = PICC_SEL_CL1; // SEL for cascade level 1
+   cmdFrame[1] = 0x70; // NVB = 70.  "This value defines that the PCD will transmit the complete UID CLn." (ISO/IEC 14443-3)
+
+   // The next few bytes in the command frame are the serial number and BCC
+   for(int i = 0 ; i < 5 ; i++) {
+    cmdFrame[i+2] = serialNumber[i];
+   }
+
+   // A CRC is computed for all data bits in the frame
+   // The result is stored in the 8th and 9th bytes in our command frame
+   StatusCode crcStatus = calculateCRC_A(cmdFrame, 7, &cmdFrame[7]);
+
+   if(crcStatus != STATUS_OK)
+    return crcStatus;
+
+   uint8_t validBits = 0; // Transmit all bits of NVB frame
+   uint8_t backLen = 3; // We expect the following bytes to come back: SAK (1 byte), CRC_A (2 bytes)
+   byte backData[3]; // Allocate a byte array
+   
+   StatusCode status = executeDataCommand(Transceive, B00110000, cmdFrame, 9, backData, &backLen, &validBits);
+ 
+   if(status == STATUS_OK && backLen == 3) {
+    byte SAK = backData[0];
+    
+    // The SAK encodes a few states. See ISO/IEC 14443-3 6.4.3.4 Table 8 for coding of SAK
+    // Here, we check for XX1XX0XX, which means "UID complete, PICC compliant with ISO/IEC 14443-4"
+    if( (SAK & B00100000) && (~SAK & B00000100) ) { 
+      Serial.println("UID complete, PICC compliant with ISO/IEC 14443-4");
+      return STATUS_OK;
+    } 
+    // Here, we check for XX0XX0XX, which means "UID complete, PICC compliant with ISO/IEC 14443-4"
+    else if(~SAK & B00100100) {
+      Serial.println("UID complete, PICC not compliant with ISO/IEC 14443-4 — perhaps it is MIFARE complaint?");
+      return STATUS_OK;      
+    }
+    
+   }
+
+   return STATUS_OK;
 }
