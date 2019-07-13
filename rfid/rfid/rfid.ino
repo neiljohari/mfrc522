@@ -17,7 +17,9 @@
    Useful reading:
    - http://xionghuilin.com/iso-iec-14443-type-ab-summary/
    - https://www.nxp.com/docs/en/application-note/AN10833.pdf
+   - https://www.nxp.com/docs/en/application-note/AN1304.pdf
    - https://cdn-shop.adafruit.com/datasheets/S50.pdf
+   - https://www.nxp.com/docs/en/data-sheet/MF1S50YYX_V1.pdf
 
    Program based on multiple other RFID libraries:
    - https://github.com/pimylifeup/MFRC522-python/blob/master/mfrc522/MFRC522.py
@@ -45,6 +47,7 @@ enum MFRC522Register : byte {
   ComIrqReg       = 0x04 << 1, // 9.3.1.5  | Interrupt request bits
   DivIrqReg       = 0x05 << 1, // 9.3.1.6  | Interrupt request bits
   ErrorReg        = 0x06 << 1, // 9.3.1.7  | Error flags from last command executed 
+  Status2Reg      = 0x08 << 1, // 9.3.1.9  | Contains status bits of the receiver, transmitter and data mode detector
   FIFODataReg     = 0x09 << 1, // 9.3.1.10 | I/O for FIFO buffer
   FIFOLevelReg    = 0x0A << 1, // 9.3.1.11 | Indicates # bytes in FIFO buffer, also can clear buffer
   ControlReg      = 0x0C << 1, // 9.3.1.13 | Miscallaneous control bits; we use it to figure out # of valid bits in a byte at the end of a frame
@@ -72,7 +75,9 @@ enum MFRC522Command : byte {
                                //             Each transmit process must be started by setting the BitFramingReg register’s StartSend bit to logic 1. 
                                //             This command must be cleared by writing any command to the CommandReg register.
                                //             If RxModeReg.RxMultiple = 1 then transcieve doesn't leave receive state.
+  MFAuthent       = B00001110, // 10.3.1.9  | Manages 3 pass authentication with Mifare cards.
   SoftReset       = B00001111, // 10.3.1.10 | Resets the MFRC522. Command automatically terminates. All registers are reset, internal memory unchanged.
+  
 };
 
 enum StatusCode : byte {
@@ -88,8 +93,12 @@ enum StatusCode : byte {
 };
 
 enum TagCommand : byte {
-  PICC_CMD_REQA   = 0x26, // REQuest command, Type A. Invites PICCs in state IDLE to go to READY and prepare for anticollision or selection. 7 bit frame.
-  PICC_SEL_CL1    = 0x93,  // SEL command for cascade level 1
+  PICC_CMD_REQA       = 0x26, // REQuest command, Type A. Invites PICCs in state IDLE to go to READY and prepare for anticollision or selection. 7 bit frame.
+  PICC_SEL_CL1        = 0x93, // SEL command for cascade level 1
+  // MF prefix means Mifare Classic Operation Command. See MF1S50YYX_V1 Document by NXP for more details.
+  PICC_MF_AUTH_KEY_A  = 0x60, // Authenticate access to the block that follows with Key A
+  PICC_MF_AUTH_KEY_B  = 0x61, // Authenticate access to the block that follows with Key B
+  PICC_MF_READ        = 0x30, // Reads a block of an authenticated sector
 };
 
 
@@ -121,7 +130,15 @@ void loop() {
 
       TagType cardType = getTagType(sak);
 
-      Serial.println(cardType);
+      if(cardType == PICC_TYPE_MIFARE_1K) {
+        Serial.println("Attempting Mifare Classic Operation");
+        byte sectorKey[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+        StatusCode mfauthentStatus = mifareAuthenticate(PICC_MF_AUTH_KEY_A, 0x00, sectorKey, serNum);
+
+        if(mfauthentStatus == STATUS_OK) {
+          Serial.println("Successfully authenticated with the Mifare Classic card!");
+        }
+      }
     }
   }
 }
@@ -340,10 +357,10 @@ StatusCode executeDataCommand(byte cmd, byte successIrqFlag,
   //  is started with the BitFramingReg register’s StartSend bit."
   if(cmd == Transceive)
     setRegBitMask(BitFramingReg, B10000000); // StartSend = 1
-    
+
   // Since we set TAuto = 1, the Timer unit has started now that transmission is
   //  over.
-    
+   
   // From my tests, on an Arduino Nano it takes ~20 microseconds to perform a
   //  register read and 2 bit comparison operations
   uint16_t i;
@@ -356,7 +373,7 @@ StatusCode executeDataCommand(byte cmd, byte successIrqFlag,
 
     if (markedIrqFlags & successIrqFlag) // Command successful 
       break;
-    
+
     // 8.4.1 TimeIrq is fired when the timer is decremented from 1 to 0
     // Since the entire timer has finished, we know the time elapsed is 25 ms.
     // See where we configure the timer during initialization for an
@@ -542,4 +559,47 @@ StatusCode selectCard(byte *serialNumber, byte &SAK) {
    }
 
    return STATUS_OK;
+}
+
+/*
+ * The following are MIFARE Classic Operation commands
+ */
+
+/*
+ * Executes the MFRC522's MFAuthent command
+ * 
+ * authType should be PICC_MF_AUTH_KEY_A or PICC_MF_AUTH_KEY_B
+ * addr is the block address and must be between 0x00 and 0x3F
+ * sectorKey must be 5 bytes long
+ * serNum must be 4 bytes long
+ */
+StatusCode mifareAuthenticate(TagCommand authType, byte addr, byte *sectorKey, byte *serNum) {
+  byte cmdFrame[12];
+  
+  cmdFrame[0] = authType;
+  cmdFrame[1] = addr;
+  
+  for(int i = 0 ; i < 6 ; i++)
+    cmdFrame[i+2] = sectorKey[i];
+  
+  for(int i = 0 ; i < 4 ; i++)
+    cmdFrame[i+8] = serNum[i];
+
+  // Regarding MFAuthent: "This command automatically terminates when the MIFARE card is authenticated
+  //  and the Status2Reg register’s MFCrypto1On bit is set to logic 1" (10.3.1.9)
+  
+  // We check IdleIrq for automatic command termination
+  StatusCode cmdStatus = executeDataCommand(MFAuthent, B00010000, cmdFrame, 12, nullptr, nullptr, nullptr);
+  // Just in case, we also check Status2Reg register’s MFCrypto1On bit which 
+  //  "can only be set to logic 1 by a successful execution of the MFAuthent command"
+  bool mfCrypto1On = readReg(Status2Reg) & B00001000;
+  
+  if(cmdStatus == STATUS_OK) {
+    if(mfCrypto1On)
+      return STATUS_OK;
+    else
+      return STATUS_ERROR; // This indicates communication is not encrypted with the card
+  } else {
+    return cmdStatus;
+  }
 }
