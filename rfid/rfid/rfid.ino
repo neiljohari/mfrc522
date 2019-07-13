@@ -447,7 +447,7 @@ StatusCode performAnticollision(byte *serialNumber) {
   // The last 4 bits of CollReg are the position of the bit collision, b5 is collision invalid/not detected
   byte collisions = readReg(CollReg) & B00111111; 
 
-  if(!(collisions & B00100000)) { // If b5 is logic 0, a collision was detected
+  if(~collisions & B00100000) { // If b5 is logic 0, a collision was detected
     Serial.println("Collision detected, aborting anticollision process");
     return STATUS_COLLISION;
   }
@@ -498,10 +498,14 @@ StatusCode selectCard(byte *serialNumber) {
  
    if(status == STATUS_OK && backLen == 3) {
     byte SAK = backData[0];
-    
+
     // The SAK encodes a few states. See ISO/IEC 14443-3 6.4.3.4 Table 8 for coding of SAK
+    if(SAK & B00000100) {
+      Serial.println("Cascade bit set: UID not complete");
+      return STATUS_COLLISION;
+    }
     // Here, we check for XX1XX0XX, which means "UID complete, PICC compliant with ISO/IEC 14443-4"
-    if( (SAK & B00100000) && (~SAK & B00000100) ) { 
+    else if( (SAK & B00100000) && (~SAK & B00000100) ) { 
       Serial.println("UID complete, PICC compliant with ISO/IEC 14443-4");
       return STATUS_OK;
     } 
