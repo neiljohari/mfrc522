@@ -78,7 +78,7 @@ enum MFRC522Command : byte {
 enum StatusCode : byte {
   STATUS_OK             , // Success
   STATUS_ERROR          , // Error in communication
-  STATUS_COLLISION      , // Collission detected
+  STATUS_COLLISION      , // Collision detected
   STATUS_TIMEOUT        , // Timeout in communication.
   STATUS_NO_ROOM        , // A buffer is not big enough.
   STATUS_INTERNAL_ERROR , // Internal error in the code. -> shouldn't happen
@@ -91,6 +91,14 @@ enum TagCommand : byte {
   PICC_CMD_REQA   = 0x26, // REQuest command, Type A. Invites PICCs in state IDLE to go to READY and prepare for anticollision or selection. 7 bit frame.
   PICC_SEL_CL1    = 0x93,  // SEL command for cascade level 1
 };
+
+
+enum TagType : byte {
+    PICC_TYPE_UNKNOWN,
+    PICC_TYPE_ISO_14443_4, // PICC compliant with ISO/IEC 14443-4  
+    PICC_TYPE_MIFARE_1K, // MIFARE Classic protocol, 1KB 
+};
+
 
 void setup() {
   Serial.begin(9600);
@@ -108,7 +116,12 @@ void loop() {
       sprintf(uid,"%02X:%02X:%02X:%02X", serNum[0], serNum[1], serNum[2], serNum[3]);
       Serial.println(uid);
 
-      selectCard(serNum);
+      byte sak;
+      selectCard(serNum, sak);
+
+      TagType cardType = getTagType(sak);
+
+      Serial.println(cardType);
     }
   }
 }
@@ -427,6 +440,25 @@ bool isNewCardPresent() {
   return (result == STATUS_OK || result == STATUS_COLLISION);
 }
 
+/**
+ * Attempts to classify a PICC based off the SAK
+ */
+TagType getTagType(byte SAK) {
+  // ISO/IEC 14443-3 6.4.3.4 Table 8 gives basic coding of SAK
+  // AN10833 MIFARE Type Identification Procedure Table 5 specifies SAK encodings for NXP cards
+  
+  // Here, we check for XX1XX0XX, which means "UID complete, PICC compliant with ISO/IEC 14443-4"
+  if( (SAK & B00100000) && (~SAK & B00000100) ) { 
+    return PICC_TYPE_ISO_14443_4;
+  } 
+  // Here, we check for XX0XX0XX, which means "UID complete, PICC compliant with ISO/IEC 14443-4"
+  else if(~SAK & B00100100) {
+    if(SAK == B00001000) // NXP SAK 
+      return PICC_TYPE_MIFARE_1K;
+  } 
+  return PICC_TYPE_UNKNOWN;
+}
+
 /*
  * This is a very basic naive implementation of anticollision.
  * 
@@ -473,7 +505,7 @@ StatusCode performAnticollision(byte *serialNumber) {
 /*
  * Given a complete Uid, this function will transition a PICC in the READY state to ACTIVE state
  */
-StatusCode selectCard(byte *serialNumber) {
+StatusCode selectCard(byte *serialNumber, byte &SAK) {
    byte cmdFrame[9];
    cmdFrame[0] = PICC_SEL_CL1; // SEL for cascade level 1
    cmdFrame[1] = 0x70; // NVB = 70.  "This value defines that the PCD will transmit the complete UID CLn." (ISO/IEC 14443-3)
@@ -497,24 +529,16 @@ StatusCode selectCard(byte *serialNumber) {
    StatusCode status = executeDataCommand(Transceive, B00110000, cmdFrame, 9, backData, &backLen, &validBits);
  
    if(status == STATUS_OK && backLen == 3) {
-    byte SAK = backData[0];
+    SAK = backData[0];
 
     // The SAK encodes a few states. See ISO/IEC 14443-3 6.4.3.4 Table 8 for coding of SAK
+
+    // Here we are just checking to see if we have a full UID
     if(SAK & B00000100) {
       Serial.println("Cascade bit set: UID not complete");
-      return STATUS_COLLISION;
+      return STATUS_INVALID;
     }
-    // Here, we check for XX1XX0XX, which means "UID complete, PICC compliant with ISO/IEC 14443-4"
-    else if( (SAK & B00100000) && (~SAK & B00000100) ) { 
-      Serial.println("UID complete, PICC compliant with ISO/IEC 14443-4");
-      return STATUS_OK;
-    } 
-    // Here, we check for XX0XX0XX, which means "UID complete, PICC compliant with ISO/IEC 14443-4"
-    else if(~SAK & B00100100) {
-      Serial.println("UID complete, PICC not compliant with ISO/IEC 14443-4 — perhaps it is MIFARE complaint?");
-      return STATUS_OK;      
-    }
-    
+
    }
 
    return STATUS_OK;
