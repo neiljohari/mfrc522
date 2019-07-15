@@ -95,6 +95,7 @@ enum StatusCode : byte {
 enum TagCommand : byte {
   PICC_CMD_REQA       = 0x26, // REQuest command, Type A. Invites PICCs in state IDLE to go to READY and prepare for anticollision or selection. 7 bit frame.
   PICC_SEL_CL1        = 0x93, // SEL command for cascade level 1
+  PICC_CMD_HLTA       = 0x50, // HALT command, Type A.
   // MF prefix means Mifare Classic Operation Command. See MF1S50YYX_V1 Document by NXP for more details.
   PICC_MF_AUTH_KEY_A  = 0x60, // Authenticate access to the block that follows with Key A
   PICC_MF_AUTH_KEY_B  = 0x61, // Authenticate access to the block that follows with Key B
@@ -116,7 +117,7 @@ void setup() {
 
 void loop() {
   if(isNewCardPresent()) {
-    byte serNum[5] = {0x00, 0x00, 0x00, 0x00, 0x00};
+    byte serNum[5];
 
     StatusCode anticollisionStatus = performAnticollision(serNum);
 
@@ -137,10 +138,21 @@ void loop() {
 
         if(mfauthentStatus == STATUS_OK) {
           Serial.println("Successfully authenticated with the Mifare Classic card!");
+
+          // TODO: Read a block?
+          
+          // According to MF1S50YYX_V1, "The HLTA command needs to be sent encrypted to the PICC after a successful 
+          //  authentication in order to be accepted."
+          // Thus, we send HALT A before stopping encrypted communication
+          sendHLTA(); 
         }
       }
     }
   }
+
+  stopEncryptedCommunication();
+
+  delay(500);
 }
 
 void initReader() {
@@ -288,6 +300,11 @@ void clearMarkedIRQBits() {
 
 void clearLoggedCollisionBits() {
   clearRegBitMask(CollReg, B10000000); 
+}
+
+// Stops Crypto1 used for Mifare protocol
+void stopEncryptedCommunication() {
+  clearRegBitMask(Status2Reg, B00001000);
 }
 
 /*
@@ -448,6 +465,34 @@ StatusCode sendREQA(byte *bufferATQA, byte *bufferSize) {
   return STATUS_OK;
 }
 
+StatusCode sendHLTA() {
+  // "The HLTA Command consists of two bytes followed by CRC_A and shall be transmitted within Standard Frame." (ISO/IEC 14443-3 6.3.3)
+  byte cmdFrame[4];
+  cmdFrame[0] = PICC_CMD_HLTA;
+  cmdFrame[1] = 0x00;
+
+  // A CRC is computed for all data bits in the frame
+  // The result is stored in the 2nd and 3rd bytes in our command frame
+  StatusCode crcStatus = calculateCRC_A(cmdFrame, 2, &cmdFrame[3]);
+  
+  if(crcStatus != STATUS_OK)
+   return crcStatus;
+
+  // This command will result in STATUS_OK for receiving any data from the PICC, and STATUS_TIMEOUT otherwise
+  StatusCode status = executeDataCommand(Transceive, B00110000, cmdFrame, 4, nullptr, nullptr, nullptr);
+
+  // ISO/IEC 14443-3 6.3.3 states "If the PICC responds with any modulation during a period of 1 ms after the end of the frame containing the HLTA
+  //  Command, this response shall be interpreted as 'not acknowledge'."
+  switch(status) {
+    case STATUS_OK: // The fact that the PICC responded means it NACKed our halt request
+      return STATUS_ERROR;
+    case STATUS_TIMEOUT: // Timeout means we stopped communicating sucessfully
+      return STATUS_TIMEOUT;
+    default: // Who knows what happened here
+      return status;
+  }
+}
+
 bool isNewCardPresent() {
   byte bufferATQA[2];
   byte bufferSize = sizeof(bufferATQA);
@@ -575,7 +620,7 @@ StatusCode selectCard(byte *serialNumber, byte &SAK) {
  */
 StatusCode mifareAuthenticate(TagCommand authType, byte addr, byte *sectorKey, byte *serNum) {
   byte cmdFrame[12];
-  
+ 
   cmdFrame[0] = authType;
   cmdFrame[1] = addr;
   
