@@ -124,7 +124,7 @@ void loop() {
     if(anticollisionStatus == STATUS_OK) {
       char uid[11];
       sprintf(uid,"%02X:%02X:%02X:%02X", serNum[0], serNum[1], serNum[2], serNum[3]);
-      Serial.println(uid);
+      Serial.println("UID of card targeted: " + String(uid));
 
       byte sak;
       selectCard(serNum, sak);
@@ -132,14 +132,29 @@ void loop() {
       TagType cardType = getTagType(sak);
 
       if(cardType == PICC_TYPE_MIFARE_1K) {
-        Serial.println("Attempting Mifare Classic Operation");
+        Serial.println("Attempting Mifare Classic Operation (MIFARE Read)");
+
+        byte targetBlock = 0x03;
+        
         byte sectorKey[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
-        StatusCode mfauthentStatus = mifareAuthenticate(PICC_MF_AUTH_KEY_A, 0x00, sectorKey, serNum);
+        StatusCode mfauthentStatus = mifareAuthenticate(PICC_MF_AUTH_KEY_A, targetBlock, sectorKey, serNum);
 
         if(mfauthentStatus == STATUS_OK) {
-          Serial.println("Successfully authenticated with the Mifare Classic card!");
+          Serial.println("Successfully authenticated target block");
 
-          // TODO: Read a block?
+          byte blockData[18] = { 0 };
+          byte blockDataSize = 18;
+          StatusCode mfReadStatus = mifareRead(targetBlock, blockData, &blockDataSize);
+          
+          if(mfReadStatus == STATUS_OK) {
+            Serial.println("Successfully read the target block's data:");
+            for(int i = 0 ; i < 16 ; i++) {
+              Serial.print(blockData[i], HEX);
+              Serial.print(" ");
+            }
+            Serial.println();
+            
+          }
           
           // According to MF1S50YYX_V1, "The HLTA command needs to be sent encrypted to the PICC after a successful 
           //  authentication in order to be accepted."
@@ -614,15 +629,15 @@ StatusCode selectCard(byte *serialNumber, byte &SAK) {
  * Executes the MFRC522's MFAuthent command
  * 
  * authType should be PICC_MF_AUTH_KEY_A or PICC_MF_AUTH_KEY_B
- * addr is the block address and must be between 0x00 and 0x3F
+ * blockAddr is the block address and must be between 0x00 and 0xFF (0x3F for a 1 kb card)
  * sectorKey must be 5 bytes long
  * serNum must be 4 bytes long
  */
-StatusCode mifareAuthenticate(TagCommand authType, byte addr, byte *sectorKey, byte *serNum) {
+StatusCode mifareAuthenticate(TagCommand authType, byte blockAddr, byte *sectorKey, byte *serNum) {
   byte cmdFrame[12];
  
   cmdFrame[0] = authType;
-  cmdFrame[1] = addr;
+  cmdFrame[1] = blockAddr;
   
   for(int i = 0 ; i < 6 ; i++)
     cmdFrame[i+2] = sectorKey[i];
@@ -647,4 +662,29 @@ StatusCode mifareAuthenticate(TagCommand authType, byte addr, byte *sectorKey, b
   } else {
     return cmdStatus;
   }
+}
+
+/*
+ * Executes MIFARE Read as documented in MF1S50YYX_V1 12.2 
+ * 
+ * blockAddr is the block address and must be between 0x00 and 0xFF (0x3F for a 1 kb card)
+ * data should be an array of size at least 18 elements; this is where the block's data will be stored
+ * dataSize is the amount of the array populated
+ */
+StatusCode mifareRead(byte blockAddr, byte *data, byte *dataSize) {
+  if (data == nullptr || *dataSize < 18) 
+    return STATUS_NO_ROOM;
+
+  byte cmdFrame[4];
+  cmdFrame[0] = PICC_MF_READ;
+  cmdFrame[1] = blockAddr;
+  
+  // A CRC is computed for all data bits in the frame
+  // The result is stored in the 2nd and 3rd bytes in our command frame
+  StatusCode crcStatus = calculateCRC_A(cmdFrame, 2, &cmdFrame[2]);
+  
+  if(crcStatus != STATUS_OK)
+    return crcStatus;  
+    
+  return executeDataCommand(Transceive, B00110000, cmdFrame, 4, data, dataSize, nullptr);
 }
