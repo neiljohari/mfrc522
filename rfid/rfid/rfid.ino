@@ -47,6 +47,7 @@ enum MFRC522Register : byte {
   ComIrqReg       = 0x04 << 1, // 9.3.1.5  | Interrupt request bits
   DivIrqReg       = 0x05 << 1, // 9.3.1.6  | Interrupt request bits
   ErrorReg        = 0x06 << 1, // 9.3.1.7  | Error flags from last command executed 
+  Status2Reg      = 0x08 << 1, // 9.3.1.9  | Contains status bits of the receiver, transmitter and data mode detector
   FIFODataReg     = 0x09 << 1, // 9.3.1.10 | I/O for FIFO buffer
   FIFOLevelReg    = 0x0A << 1, // 9.3.1.11 | Indicates # bytes in FIFO buffer, also can clear buffer
   ControlReg      = 0x0C << 1, // 9.3.1.13 | Miscallaneous control bits; we use it to figure out # of valid bits in a byte at the end of a frame
@@ -584,6 +585,21 @@ StatusCode mifareAuthenticate(TagCommand authType, byte addr, byte *sectorKey, b
   for(int i = 0 ; i < 4 ; i++)
     cmdFrame[i+8] = serNum[i];
 
-   // Success flag is just IdleIrq because "This command automatically terminates when the MIFARE card is authenticated" (10.3.1.9)
-   return executeDataCommand(MFAuthent, B00010000, cmdFrame, 12, nullptr, nullptr, nullptr);
+  // Regarding MFAuthent: "This command automatically terminates when the MIFARE card is authenticated
+  //  and the Status2Reg register’s MFCrypto1On bit is set to logic 1" (10.3.1.9)
+  
+  // We check IdleIrq for automatic command termination
+  StatusCode cmdStatus = executeDataCommand(MFAuthent, B00010000, cmdFrame, 12, nullptr, nullptr, nullptr);
+  // Just in case, we also check Status2Reg register’s MFCrypto1On bit which 
+  //  "can only be set to logic 1 by a successful execution of the MFAuthent command"
+  bool mfCrypto1On = readReg(Status2Reg) & B00001000;
+  
+  if(cmdStatus == STATUS_OK) {
+    if(mfCrypto1On)
+      return STATUS_OK;
+    else
+      return STATUS_ERROR; // This indicates communication is not encrypted with the card
+  } else {
+    return cmdStatus;
+  }
 }
