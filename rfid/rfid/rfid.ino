@@ -401,7 +401,7 @@ StatusCode calculateCRC_A(byte *data, byte dataLen, byte *result) {
  */
 StatusCode executeDataCommand(byte cmd, byte successIrqFlag, 
                               byte *sendData, byte sendLen, byte *backData, 
-                              byte *backLen, byte *validBitsInLastByte) { 
+                              byte *backLen, byte *validBitsInLastByte, byte rxAlign) { 
   writeReg(CommandReg, Idle); // Idle halts any currently running commands
   clearMarkedIRQBits();
   flushFIFOBuffer();
@@ -415,7 +415,9 @@ StatusCode executeDataCommand(byte cmd, byte successIrqFlag,
 
   // Frame adjustment for BitFramingReg
   byte txLastBits = validBitsInLastByte ? *validBitsInLastByte : 0;
-  writeReg(BitFramingReg, txLastBits);
+  byte bitFraming = (rxAlign << 4) + txLastBits; // RxAlign is defined in bits 4 to 6, and TxLastBits is 2 to 0
+  
+  writeReg(BitFramingReg, bitFraming);
 
   // Execute command
   writeReg(CommandReg, cmd); 
@@ -541,6 +543,71 @@ StatusCode sendHLTA() {
     default: // Who knows what happened here
       return status;
   }
+}
+
+/*
+ * This is a very versatile implementation of the SELECT command described in the ISO/IEC 1444-3
+ * It can execute a SEL command for any cascade level, and send any number of bits out.
+ * 
+ * The integrity of the backData will be verified with a BCC checksum.
+ * 
+ * Parameters:
+ * inputs:
+ *  - cascadeCommand: specifies which cascade level SEL should be executed
+ *  - nvb: Number Valid Bits encoding as described by the ISO/IEC 1444-3
+ *  - sendData: any number of bits of UID you wish to send
+ * outputs:
+ *  - backData: data returned from PICC. Could be either the remaining bits of a UID for a PICC, or a SAK + CRC_A
+ *  - backLen: length in bytes of data returned
+ *  - validReturnBits: number of valid bits in last byte returned
+ */
+StatusCode sendSEL(byte cascadeCommand, byte nvb, byte *sendData, byte *backData, byte *backLen, byte *validReturnBits) {
+  byte nvbByteCount = (nvb & B11110000) >> 4;
+  byte nvbBitCount = (nvb & B00001111);
+
+  // Allocate 2 bytes for SEL and NVB, and then the bytes needed for the portion of the UID being sent
+  //  additionally, if there are some bits in the last byte being sent, we'll need to allocate another byte
+  const byte cmdBufferSize = 2 + nvbByteCount + (nvbBitCount == 0 ? 0 : 1);
+  
+  byte cmdFrame[cmdBufferSize]; 
+  
+  cmdFrame[0] = cascadeCommand; // SEL command for corresponding cascade level
+  cmdFrame[1] = nvb; // NVB. See ISO/IEC 14443-3 6.4.3.3 for "Coding of NVB"
+
+  // Send some portion of 
+  for(int i = 0 ; i < cmdBufferSize ; i++) {
+    cmdFrame[i+2] = sendData[i];
+  }
+
+  uint8_t validBits = nvbBitCount; // Transmit only the number of bits specified by NVB in the last byte of sendUid
+
+  clearLoggedCollisionBits();
+  StatusCode status = executeDataCommand(Transceive, B00110000, cmdFrame, cmdBufferSize, backData, backLen, &validBits);
+  *validReturnBits = validBits;
+  
+  // The last 4 bits of CollReg are the position of the bit collision, b5 is collision invalid/not detected
+  byte collisions = readReg(CollReg) & B00111111; 
+
+  if(~collisions & B00100000) { // If b5 is logic 0, a collision was detected
+    return STATUS_COLLISION;
+  }
+
+  if(status == STATUS_OK && backLen == 5) {
+    // "UID CLn check byte, calculated as exclusive-or over the 4 previous bytes, Type A" (ISO/IEC 1444-3 4)
+    byte byte0 = backData[0];
+    byte byte1 = backData[1];
+    byte byte2 = backData[2];
+    byte byte3 = backData[3];
+    byte BCC   = backData[4];
+    
+    byte checksum = byte0 ^ byte1 ^ byte2 ^ byte3;
+
+    if(checksum != BCC)
+      return STATUS_ERROR;
+  }
+  
+  return status;
+  
 }
 
 bool isNewCardPresent() {
