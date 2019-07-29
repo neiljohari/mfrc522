@@ -646,40 +646,11 @@ TagType getTagType(byte SAK) {
  * Additionally, it does not verify that we have received the SAK (Select AcKnowledge) frame which would indicate a full UID.
  */
 StatusCode performAnticollision(byte *serialNumber) {
-  byte cmdFrame[2]; // Allocate 2 byte command frame for the PCD to transmit
-  cmdFrame[0] = PICC_SEL_CL1; // SEL for cascade level 1
-  cmdFrame[1] = 0x20; // NVB = 20. "This value defines that the PCD will transmit no part of UID CLn" (ISO/IEC 14443-3)
-
-  uint8_t validBits = 0; // Transmit all bits of NVB frame
-  uint8_t backLen = 5; // We expect the following bytes to come back: uid0, uid1, uid2, uid3, BCC
-
-  clearLoggedCollisionBits();
-  StatusCode status = executeDataCommand(Transceive, B00110000, cmdFrame, 2, serialNumber, &backLen, &validBits, 0);
-
-  // The last 4 bits of CollReg are the position of the bit collision, b5 is collision invalid/not detected
-  byte collisions = readReg(CollReg) & B00111111; 
-
-  if(~collisions & B00100000) { // If b5 is logic 0, a collision was detected
-    Serial.println("Collision detected, aborting anticollision process");
-    return STATUS_COLLISION;
-  }
-    
-  // The command was successful, now lets use the BCC checksum to verify the integrity of our UID chunk
-  // BCC is "UID CLn check byte, calculated as exclusive-or over the 4 previous bytes, Type A" (ISO/IEC 14443-3)
-  if (status == STATUS_OK) {
-    byte uid0 = serialNumber[0];
-    byte uid1 = serialNumber[1];
-    byte uid2 = serialNumber[2];
-    byte uid3 = serialNumber[3];
-    byte BCC  = serialNumber[4];
-    
-    byte checksum = uid0 ^ uid1 ^ uid2 ^ uid3;
-
-    if(checksum != BCC)
-      return STATUS_ERROR; 
-  }
+  byte *validReturnBits = 0;
+  byte *backLen;
+  *backLen = 5;
   
-  return status;
+  return sendSEL(PICC_SEL_CL1, 0x20, serialNumber, serialNumber, backLen, validReturnBits);
 }
 
 /*
