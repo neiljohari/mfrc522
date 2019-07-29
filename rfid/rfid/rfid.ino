@@ -568,7 +568,8 @@ StatusCode sendSEL(byte cascadeCommand, byte nvb, byte *sendData, byte *backData
 
   // Allocate 2 bytes for SEL and NVB, and then the bytes needed for the portion of the UID being sent
   //  additionally, if there are some bits in the last byte being sent, we'll need to allocate another byte
-  const byte cmdBufferSize = 2 + nvbByteCount + (nvbBitCount == 0 ? 0 : 1);
+  //  additionally, if we are sending the whole UID we will need another 2 bytes for the CRC_A
+  const byte cmdBufferSize = 2 + nvbByteCount + (nvbBitCount == 0 ? 0 : 1) + (nvb == 0x70 ? 2 : 0);
   
   byte cmdFrame[cmdBufferSize]; 
   
@@ -578,6 +579,16 @@ StatusCode sendSEL(byte cascadeCommand, byte nvb, byte *sendData, byte *backData
   // Send the known portion of the Uid
   for(int i = 0 ; i < cmdBufferSize ; i++) {
     cmdFrame[i+2] = sendData[i];
+  }
+
+  if(nvb == 0x70) {
+   uint8_t crcDataSize = cmdBufferSize - 2;
+   // A CRC is computed for all data bits currently in the frame
+   // The result is stored in the last 2 bytes in our command frame
+   StatusCode crcStatus = calculateCRC_A(cmdFrame, crcDataSize, &cmdFrame[crcDataSize]);
+
+   if(crcStatus != STATUS_OK)
+    return crcStatus;
   }
 
   uint8_t validBits = nvbBitCount; // Transmit only the number of bits specified by NVB in the last byte of sendUid
@@ -646,42 +657,24 @@ TagType getTagType(byte SAK) {
  * Additionally, it does not verify that we have received the SAK (Select AcKnowledge) frame which would indicate a full UID.
  */
 StatusCode performAnticollision(byte *serialNumber) {
-  byte *validReturnBits = 0;
-  byte *backLen;
-  *backLen = 5;
+  byte validReturnBits = 0;
+  byte backLen = 5;
   
-  return sendSEL(PICC_SEL_CL1, 0x20, serialNumber, serialNumber, backLen, validReturnBits);
+  return sendSEL(PICC_SEL_CL1, 0x20, serialNumber, serialNumber, &backLen, &validReturnBits);
 }
 
 /*
  * Given a complete Uid, this function will transition a PICC in the READY state to ACTIVE state
  */
 StatusCode selectCard(byte *serialNumber, byte &SAK) {
-   byte cmdFrame[9];
-   cmdFrame[0] = PICC_SEL_CL1; // SEL for cascade level 1
-   cmdFrame[1] = 0x70; // NVB = 70.  "This value defines that the PCD will transmit the complete UID CLn." (ISO/IEC 14443-3)
-
-   // The next few bytes in the command frame are the serial number and BCC
-   for(int i = 0 ; i < 5 ; i++) {
-    cmdFrame[i+2] = serialNumber[i];
-   }
-
-   // A CRC is computed for all data bits in the frame
-   // The result is stored in the 8th and 9th bytes in our command frame
-   StatusCode crcStatus = calculateCRC_A(cmdFrame, 7, &cmdFrame[7]);
-
-   if(crcStatus != STATUS_OK)
-    return crcStatus;
-
-   uint8_t validBits = 0; // Transmit all bits of NVB frame
+   byte validReturnBits = 0;
    uint8_t backLen = 3; // We expect the following bytes to come back: SAK (1 byte), CRC_A (2 bytes)
-   byte backData[3]; // Allocate a byte array
+   byte backData[3]; // Allocate the byte array
+
+   StatusCode status = sendSEL(PICC_SEL_CL1, 0x70, serialNumber, backData, &backLen, &validReturnBits);
    
-   StatusCode status = executeDataCommand(Transceive, B00110000, cmdFrame, 9, backData, &backLen, &validBits, 0);
- 
    if(status == STATUS_OK && backLen == 3) {
     SAK = backData[0];
-
     // The SAK encodes a few states. See ISO/IEC 14443-3 6.4.3.4 Table 8 for coding of SAK
 
     // Here we are just checking to see if we have a full UID
@@ -689,7 +682,6 @@ StatusCode selectCard(byte *serialNumber, byte &SAK) {
       Serial.println("Cascade bit set: UID not complete");
       return STATUS_INVALID;
     }
-
    }
 
    return STATUS_OK;
