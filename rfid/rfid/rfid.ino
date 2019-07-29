@@ -474,7 +474,7 @@ StatusCode executeDataCommand(byte cmd, byte successIrqFlag,
     
     *backLen = fifoByteCount;
 
-    readFIFOData(fifoByteCount, backData, 0);
+    readFIFOData(fifoByteCount, backData, rxAlign);
    
     // Some of the data in the last byte might not actually be part of the data we want.
     // ControlReg.RxLastBits (b2 to b0) indicates the number of valid bits in
@@ -506,7 +506,7 @@ StatusCode sendREQA(byte *bufferATQA, byte *bufferSize) {
   uint8_t validBits = 7;                  
 
   byte command = PICC_CMD_REQA;
-  StatusCode status = executeDataCommand(Transceive, B00110000, &command, 1, bufferATQA, bufferSize, &validBits);
+  StatusCode status = executeDataCommand(Transceive, B00110000, &command, 1, bufferATQA, bufferSize, &validBits, 0);
 
   if (status != STATUS_OK) 
     return status;
@@ -531,7 +531,7 @@ StatusCode sendHLTA() {
    return crcStatus;
 
   // This command will result in STATUS_OK for receiving any data from the PICC, and STATUS_TIMEOUT otherwise
-  StatusCode status = executeDataCommand(Transceive, B00110000, cmdFrame, 4, nullptr, nullptr, nullptr);
+  StatusCode status = executeDataCommand(Transceive, B00110000, cmdFrame, 4, nullptr, nullptr, nullptr, 0);
 
   // ISO/IEC 14443-3 6.3.3 states "If the PICC responds with any modulation during a period of 1 ms after the end of the frame containing the HLTA
   //  Command, this response shall be interpreted as 'not acknowledge'."
@@ -562,8 +562,9 @@ StatusCode sendHLTA() {
  *  - validReturnBits: number of valid bits in last byte returned
  */
 StatusCode sendSEL(byte cascadeCommand, byte nvb, byte *sendData, byte *backData, byte *backLen, byte *validReturnBits) {
-  byte nvbByteCount = (nvb & B11110000) >> 4;
-  byte nvbBitCount = (nvb & B00001111);
+  const byte nvbByteCount = (nvb & B11110000) >> 4;
+  const byte nvbBitCount = (nvb & B00001111);
+  const byte totalKnownBitsForCascadeLevel = nvbByteCount * 8 + nvbBitCount;
 
   // Allocate 2 bytes for SEL and NVB, and then the bytes needed for the portion of the UID being sent
   //  additionally, if there are some bits in the last byte being sent, we'll need to allocate another byte
@@ -574,7 +575,7 @@ StatusCode sendSEL(byte cascadeCommand, byte nvb, byte *sendData, byte *backData
   cmdFrame[0] = cascadeCommand; // SEL command for corresponding cascade level
   cmdFrame[1] = nvb; // NVB. See ISO/IEC 14443-3 6.4.3.3 for "Coding of NVB"
 
-  // Send some portion of 
+  // Send the known portion of the Uid
   for(int i = 0 ; i < cmdBufferSize ; i++) {
     cmdFrame[i+2] = sendData[i];
   }
@@ -582,7 +583,7 @@ StatusCode sendSEL(byte cascadeCommand, byte nvb, byte *sendData, byte *backData
   uint8_t validBits = nvbBitCount; // Transmit only the number of bits specified by NVB in the last byte of sendUid
 
   clearLoggedCollisionBits();
-  StatusCode status = executeDataCommand(Transceive, B00110000, cmdFrame, cmdBufferSize, backData, backLen, &validBits);
+  StatusCode status = executeDataCommand(Transceive, B00110000, cmdFrame, cmdBufferSize, backData, backLen, &validBits, totalKnownBitsForCascadeLevel % 8);
   *validReturnBits = validBits;
   
   // The last 4 bits of CollReg are the position of the bit collision, b5 is collision invalid/not detected
@@ -592,7 +593,7 @@ StatusCode sendSEL(byte cascadeCommand, byte nvb, byte *sendData, byte *backData
     return STATUS_COLLISION;
   }
 
-  if(status == STATUS_OK && backLen == 5) {
+  if(status == STATUS_OK && backLen && *backLen == 5) {
     // "UID CLn check byte, calculated as exclusive-or over the 4 previous bytes, Type A" (ISO/IEC 1444-3 4)
     byte byte0 = backData[0];
     byte byte1 = backData[1];
@@ -653,7 +654,7 @@ StatusCode performAnticollision(byte *serialNumber) {
   uint8_t backLen = 5; // We expect the following bytes to come back: uid0, uid1, uid2, uid3, BCC
 
   clearLoggedCollisionBits();
-  StatusCode status = executeDataCommand(Transceive, B00110000, cmdFrame, 2, serialNumber, &backLen, &validBits);
+  StatusCode status = executeDataCommand(Transceive, B00110000, cmdFrame, 2, serialNumber, &backLen, &validBits, 0);
 
   // The last 4 bits of CollReg are the position of the bit collision, b5 is collision invalid/not detected
   byte collisions = readReg(CollReg) & B00111111; 
@@ -705,7 +706,7 @@ StatusCode selectCard(byte *serialNumber, byte &SAK) {
    uint8_t backLen = 3; // We expect the following bytes to come back: SAK (1 byte), CRC_A (2 bytes)
    byte backData[3]; // Allocate a byte array
    
-   StatusCode status = executeDataCommand(Transceive, B00110000, cmdFrame, 9, backData, &backLen, &validBits);
+   StatusCode status = executeDataCommand(Transceive, B00110000, cmdFrame, 9, backData, &backLen, &validBits, 0);
  
    if(status == STATUS_OK && backLen == 3) {
     SAK = backData[0];
@@ -751,7 +752,7 @@ StatusCode mifareAuthenticate(TagCommand authType, byte blockAddr, byte *sectorK
   //  and the Status2Reg register’s MFCrypto1On bit is set to logic 1" (10.3.1.9)
   
   // We check IdleIrq for automatic command termination
-  StatusCode cmdStatus = executeDataCommand(MFAuthent, B00010000, cmdFrame, 12, nullptr, nullptr, nullptr);
+  StatusCode cmdStatus = executeDataCommand(MFAuthent, B00010000, cmdFrame, 12, nullptr, nullptr, nullptr, 0);
   // Just in case, we also check Status2Reg register’s MFCrypto1On bit which 
   //  "can only be set to logic 1 by a successful execution of the MFAuthent command"
   bool mfCrypto1On = readReg(Status2Reg) & B00001000;
@@ -788,5 +789,5 @@ StatusCode mifareRead(byte blockAddr, byte *data, byte *dataSize) {
   if(crcStatus != STATUS_OK)
     return crcStatus;  
     
-  return executeDataCommand(Transceive, B00110000, cmdFrame, 4, data, dataSize, nullptr);
+  return executeDataCommand(Transceive, B00110000, cmdFrame, 4, data, dataSize, nullptr, 0);
 }
