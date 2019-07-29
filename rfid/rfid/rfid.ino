@@ -261,6 +261,42 @@ byte readReg(byte addr) {
 }
 
 /*
+* This implements 8.1.2.1 of the MFRC522 datasheet specificially for the FIFODataReg
+* 
+* As expected, it repeatedly reads the register and discards the first received data byte.
+* It ends reading by sending 0x00.
+* 
+* The rxAlign parameter controls which bit (from the least significant bit in MSB form) of the first 
+* byte the data begins being written from. The other bits are preserved.
+*/
+
+void readFIFOData(uint8_t numBytes, byte *backData, byte rxAlign) {
+  // The MFRC522 follows the most common SPI communication pattern
+  // Thus, we can follow https://www.arduino.cc/en/Reference/SPI
+  SPI.beginTransaction(SPI_CONFIG);
+
+  digitalWrite(SS, LOW); // Choose slave
+
+  // 8.1.2.3 "The MSB of the first byte defines the mode used. To read data from
+  // the MFRC522 the MSB is set to logic 1. "
+  SPI.transfer(B10000000 | FIFODataReg);
+
+  // Table 6 shows the order of MOSI and MISO
+  // The reads and returned data are staggered
+  for(int i = 0 ; i < numBytes - 1 ; i++) {
+    byte bufferDataReturned = SPI.transfer(B10000000 | FIFODataReg);
+    if(i == 0 && rxAlign) {
+      byte mask = 0xFF << rxAlign;
+      backData[0] = (backData[0] & ~mask) | (bufferDataReturned & mask);
+    } else {
+      backData[i] = bufferDataReturned;
+    }
+  }
+
+  backData[numBytes-1] =  SPI.transfer(0x00);
+}
+
+/*
 * Using bit masks allow us to alter only specific bits in a binary value.  This
 * helps us preserve bits that may be settings and still change what we want.
 * 
@@ -436,9 +472,8 @@ StatusCode executeDataCommand(byte cmd, byte successIrqFlag,
     
     *backLen = fifoByteCount;
 
-    for (int i = 0; i < fifoByteCount; i++) 
-      backData[i] = readReg(FIFODataReg);  
-
+    readFIFOData(fifoByteCount, backData, 0);
+   
     // Some of the data in the last byte might not actually be part of the data we want.
     // ControlReg.RxLastBits (b2 to b0) indicates the number of valid bits in
     //  the last byte, "if this value is 000b, the whole byte is valid"
