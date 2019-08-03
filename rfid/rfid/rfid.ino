@@ -122,6 +122,7 @@ void loop() {
     StatusCode anticollisionStatus = performAnticollision(serNum);
 
     if(anticollisionStatus == STATUS_OK) {
+
       char uid[11];
       sprintf(uid,"%02X:%02X:%02X:%02X", serNum[0], serNum[1], serNum[2], serNum[3]);
       Serial.println("UID of card targeted: " + String(uid));
@@ -145,7 +146,7 @@ void loop() {
           byte blockData[18] = { 0 };
           byte blockDataSize = 18;
           StatusCode mfReadStatus = mifareRead(targetBlock, blockData, &blockDataSize);
-          
+
           if(mfReadStatus == STATUS_OK) {
             Serial.println("Successfully read the target block's data:");
             for(int i = 0 ; i < 16 ; i++) {
@@ -154,7 +155,7 @@ void loop() {
             }
             Serial.println();
             
-          }
+          } 
           
           // According to MF1S50YYX_V1, "The HLTA command needs to be sent encrypted to the PICC after a successful 
           //  authentication in order to be accepted."
@@ -281,6 +282,7 @@ void readFIFOData(uint8_t numBytes, byte *backData, byte rxAlign) {
   // the MFRC522 the MSB is set to logic 1. "
   SPI.transfer(B10000000 | FIFODataReg);
 
+    
   // Table 6 shows the order of MOSI and MISO
   // The reads and returned data are staggered
   for(int i = 0 ; i < numBytes - 1 ; i++) {
@@ -292,8 +294,11 @@ void readFIFOData(uint8_t numBytes, byte *backData, byte rxAlign) {
       backData[i] = bufferDataReturned;
     }
   }
-
+  
   backData[numBytes-1] =  SPI.transfer(0x00);
+
+  digitalWrite(SS, HIGH);      // Release slave
+  SPI.endTransaction();
 }
 
 /*
@@ -452,6 +457,7 @@ StatusCode executeDataCommand(byte cmd, byte successIrqFlag,
       return STATUS_TIMEOUT; 
   }
 
+  
   clearRegBitMask(BitFramingReg, B10000000); // Stop forcing data transmission
 
   // 20 microseconds * 2000 = 40 ms elapsed and we didn't get a successful flag
@@ -465,7 +471,7 @@ StatusCode executeDataCommand(byte cmd, byte successIrqFlag,
   //  b7 .  b6 .    b5 .     b4 .       b3 .    b2 .   b1 .      b0
   if(readReg(ErrorReg) & B00010011) // BufferOvfl, ParityErr, and ProtocolErr
     return STATUS_ERROR;
-    
+
   if (backData && backLen) {
     byte fifoByteCount = readReg(FIFOLevelReg); 
 
@@ -475,18 +481,20 @@ StatusCode executeDataCommand(byte cmd, byte successIrqFlag,
     *backLen = fifoByteCount;
 
     readFIFOData(fifoByteCount, backData, rxAlign);
+
    
     // Some of the data in the last byte might not actually be part of the data we want.
     // ControlReg.RxLastBits (b2 to b0) indicates the number of valid bits in
     //  the last byte, "if this value is 000b, the whole byte is valid"
     if (validBitsInLastByte) 
       *validBitsInLastByte = readReg(ControlReg) & B00000111; // extracts the last 3 bits 
+    
   }
 
-  
   if (readReg(ErrorReg) & B00001000)  // CollErr, see ErrorReg return bits comment above
     return STATUS_COLLISION;
-
+    
+  
   return STATUS_OK;
 }
 
@@ -609,7 +617,7 @@ StatusCode sendSEL(byte cascadeCommand, byte nvb, byte *sendData, byte *backData
   if(~collisions & B00100000) { // If b5 is logic 0, a collision was detected
     return STATUS_COLLISION;
   }
-
+  
   if(status == STATUS_OK && backLen && *backLen == 5) {
     // "UID CLn check byte, calculated as exclusive-or over the 4 previous bytes, Type A" (ISO/IEC 1444-3 4)
     byte byte0 = backData[0];
