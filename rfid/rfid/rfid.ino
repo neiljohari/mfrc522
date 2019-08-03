@@ -562,15 +562,21 @@ StatusCode sendHLTA() {
  *  - validReturnBits: number of valid bits in last byte returned
  */
 StatusCode sendSEL(byte cascadeCommand, byte nvb, byte *sendData, byte *backData, byte *backLen, byte *validReturnBits) {
+
+  // NVB description:
+  //  nvbByteCount: "The upper 4 bits are called “Byte count” and specify the integer part of the number of all valid data bits transmitted
+  //   by the PCD (including SEL and NVB) divided by 8" (ISO/IEC 1444-3 6.4.3.3)
+  //  nvbBitCount: "The lower 4 bits are called “bit count” and specify the number of all valid data bits transmitted by the PCD
+  //   (including SEL and NVB) modulo 8."
   const byte nvbByteCount = (nvb & B11110000) >> 4;
   const byte nvbBitCount = (nvb & B00001111);
   const byte totalKnownBitsForCascadeLevel = nvbByteCount * 8 + nvbBitCount;
 
-  // Allocate 2 bytes for SEL and NVB, and then the bytes needed for the portion of the UID being sent
+  // nvbByteCount accounts for SEL and NVB (so it is always >= 2) and also the integer part of all valid bits transmitted
   //  additionally, if there are some bits in the last byte being sent, we'll need to allocate another byte
   //  additionally, if we are sending the whole UID we will need another 2 bytes for the CRC_A
-  const byte cmdBufferSize = 2 + nvbByteCount + (nvbBitCount == 0 ? 0 : 1) + (nvb == 0x70 ? 2 : 0);
-  
+  const byte cmdBufferSize = nvbByteCount + (nvbBitCount == 0 ? 0 : 1) + (nvb == 0x70 ? 2 : 0);
+
   byte cmdFrame[cmdBufferSize]; 
   
   cmdFrame[0] = cascadeCommand; // SEL command for corresponding cascade level
