@@ -119,7 +119,7 @@ void loop() {
   if(isNewCardPresent()) {
     byte serNum[5];
 
-    StatusCode anticollisionStatus = performAnticollision(serNum);
+    StatusCode anticollisionStatus = performAnticollision(PICC_SEL_CL1, serNum);
 
     if(anticollisionStatus == STATUS_OK) {
 
@@ -131,7 +131,7 @@ void loop() {
       selectCard(serNum, sak);
 
       TagType cardType = getTagType(sak);
-
+      
       if(cardType == PICC_TYPE_MIFARE_1K) {
         Serial.println("Attempting Mifare Classic Operation (MIFARE Read)");
 
@@ -163,12 +163,14 @@ void loop() {
           sendHLTA(); 
         }
       }
+    } else {
+      Serial.print("Anticollision failed with status code: "); Serial.println(anticollisionStatus);
     }
   }
 
   stopEncryptedCommunication();
 
-  delay(500);
+  delay(2000);
 }
 
 void initReader() {
@@ -565,7 +567,7 @@ StatusCode sendHLTA() {
  *  - nvb: Number Valid Bits encoding as described by the ISO/IEC 1444-3
  *  - sendData: any number of bits of UID you wish to send
  * outputs:
- *  - backData: data returned from PICC. Could be either the remaining bits of a UID for a PICC, or a SAK + CRC_A
+ *  - backData: data returned from PICC. Could be either the remaining bits of a UID for a PICC + BCC, or a SAK + CRC_A
  *  - backLen: length in bytes of data returned
  *  - validReturnBits: number of valid bits in last byte returned
  */
@@ -662,6 +664,65 @@ TagType getTagType(byte SAK) {
       return PICC_TYPE_MIFARE_1K;
   } 
   return PICC_TYPE_UNKNOWN;
+}
+
+
+StatusCode performAnticollision(byte cascadeCommand, byte *uidBuffer) {
+  uint8_t knownUidLen = 0;
+
+  bool collision = false;
+  uint8_t collisionPosition = 0; // This is the bit within this cascade level that a collision occurred
+  byte NVB = 0x20; // Start off with minimum valid bits
+
+  Serial.println("\n performAnticollision() called");
+  do {
+    if (collision) {
+      Serial.println("**Collision detected. Attempting to resolve it.**");
+      
+      if (readReg(CollReg) & B00100000) { // CollPosNotValid
+        Serial.println("collpos not valid. aborting this run at anticollision");
+        return STATUS_COLLISION; 
+      }
+      
+      collisionPosition = readReg(CollReg) & B00011111; // The CollPos is b4..b0, this handles bit values 0-31
+      if(collisionPosition == 0x00) collisionPosition = 32; // bit collision at 32nd bit is represented as 0x00
+
+      Serial.print("A collision was detected at this bit: "); Serial.println(collisionPosition);
+      
+      // There are 4 UID bytes for a given cascade level. Since integral division is truncation, this gives us a zero-indexed 
+      //  number representing the whole number of bytes needed to represent this collision
+      byte collisionByte = collisionPosition / 8; 
+      // This is the actual bit within the above specified byte that has collided
+      byte collisionBitWithinByte = collisionPosition % 8; 
+  
+      // Now we craft an NVB code using ISO/IEC 14443-3 6.4.3.3 Table 7
+      NVB += (collisionByte << 4) + collisionBitWithinByte;
+      Serial.print("Our NVB frame is now 0x"); Serial.println(NVB, HEX);
+
+      Serial.println("Altering collision byte");
+      Serial.print("Original byte: "); Serial.println(uidBuffer[collisionByte], BIN);
+      
+      // We set the collided bit to 1b
+      uidBuffer[collisionByte] |= 1 << (collisionBitWithinByte-1); 
+      
+      Serial.print("Altered byte: "); Serial.println(uidBuffer[collisionByte], BIN);
+    }
+
+    byte backDataLen = 5;
+    byte validReturnBits;
+    StatusCode commandStatus = sendSEL(cascadeCommand, NVB, uidBuffer, uidBuffer, &backDataLen, &validReturnBits);
+        
+    collision = (commandStatus == STATUS_COLLISION);
+
+    if(commandStatus != STATUS_COLLISION && commandStatus != STATUS_OK) {
+      Serial.print("sendSEL did something unexpected! It returned status code: "); Serial.println(commandStatus);
+      return commandStatus;
+    }
+    
+  } while (collision == true);
+ 
+
+  return STATUS_OK;
 }
 
 /*
