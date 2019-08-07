@@ -620,7 +620,7 @@ StatusCode sendSEL(byte cascadeCommand, byte nvb, byte *sendData, byte *backData
     return STATUS_COLLISION;
   }
   
-  if(status == STATUS_OK && backLen && *backLen == 5 && nvb == 0x70) { // TODO: Maybe we can calculate BCC before whole frame is sent?
+  if(status == STATUS_OK && backLen && *backLen == 5) {
     // "UID CLn check byte, calculated as exclusive-or over the 4 previous bytes, Type A" (ISO/IEC 1444-3 4)
     byte byte0 = backData[0];
     byte byte1 = backData[1];
@@ -631,6 +631,8 @@ StatusCode sendSEL(byte cascadeCommand, byte nvb, byte *sendData, byte *backData
     byte checksum = ((byte0 ^ byte1) ^ byte2) ^ byte3;
 
     if(checksum != BCC) {
+      Serial.println("FAILED CHECKSUM");
+      Serial.print("Got: "); Serial.print(checksum); Serial.print(", expected:"); Serial.println(BCC);
       return STATUS_ERROR;
     }
   }
