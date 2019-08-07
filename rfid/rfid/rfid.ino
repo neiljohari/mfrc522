@@ -726,19 +726,6 @@ StatusCode performAnticollision(byte cascadeCommand, byte *uidBuffer) {
 }
 
 /*
- * This is a very basic naive implementation of anticollision.
- * 
- * It does not handle bit collisions, nor does it escalate cascade levels to retrieve a UID larger than type single. 
- * Additionally, it does not verify that we have received the SAK (Select AcKnowledge) frame which would indicate a full UID.
- */
-StatusCode performAnticollision(byte *serialNumber) {
-  byte validReturnBits = 0;
-  byte backLen = 5;
-  
-  return sendSEL(PICC_SEL_CL1, 0x20, serialNumber, serialNumber, &backLen, &validReturnBits);
-}
-
-/*
  * Given a complete Uid, this function will transition a PICC in the READY state to ACTIVE state
  */
 StatusCode selectCard(byte *serialNumber, byte &SAK) {
