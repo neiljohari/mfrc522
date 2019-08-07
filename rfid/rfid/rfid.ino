@@ -117,7 +117,7 @@ void setup() {
 
 void loop() {
   if(isNewCardPresent()) {
-    byte serNum[5];
+    byte serNum[5] = {0x00};
 
     StatusCode anticollisionStatus = performAnticollision(PICC_SEL_CL1, serNum);
 
@@ -620,7 +620,7 @@ StatusCode sendSEL(byte cascadeCommand, byte nvb, byte *sendData, byte *backData
     return STATUS_COLLISION;
   }
   
-  if(status == STATUS_OK && backLen && *backLen == 5) {
+  if(status == STATUS_OK && backLen && *backLen == 5 && nvb == 0x70) { // TODO: Maybe we can calculate BCC before whole frame is sent?
     // "UID CLn check byte, calculated as exclusive-or over the 4 previous bytes, Type A" (ISO/IEC 1444-3 4)
     byte byte0 = backData[0];
     byte byte1 = backData[1];
@@ -628,10 +628,11 @@ StatusCode sendSEL(byte cascadeCommand, byte nvb, byte *sendData, byte *backData
     byte byte3 = backData[3];
     byte BCC   = backData[4];
     
-    byte checksum = byte0 ^ byte1 ^ byte2 ^ byte3;
+    byte checksum = ((byte0 ^ byte1) ^ byte2) ^ byte3;
 
-    if(checksum != BCC)
+    if(checksum != BCC) {
       return STATUS_ERROR;
+    }
   }
   
   return status;
@@ -666,10 +667,7 @@ TagType getTagType(byte SAK) {
   return PICC_TYPE_UNKNOWN;
 }
 
-
 StatusCode performAnticollision(byte cascadeCommand, byte *uidBuffer) {
-  uint8_t knownUidLen = 0;
-
   bool collision = false;
   uint8_t collisionPosition = 0; // This is the bit within this cascade level that a collision occurred
   byte NVB = 0x20; // Start off with minimum valid bits
@@ -680,7 +678,7 @@ StatusCode performAnticollision(byte cascadeCommand, byte *uidBuffer) {
       Serial.println("**Collision detected. Attempting to resolve it.**");
       
       if (readReg(CollReg) & B00100000) { // CollPosNotValid
-        Serial.println("collpos not valid. aborting this run at anticollision");
+        Serial.println("CollPos not valid. Aborting this anticollision.");
         return STATUS_COLLISION; 
       }
       
@@ -699,19 +697,51 @@ StatusCode performAnticollision(byte cascadeCommand, byte *uidBuffer) {
       NVB += (collisionByte << 4) + collisionBitWithinByte;
       Serial.print("Our NVB frame is now 0x"); Serial.println(NVB, HEX);
 
-      Serial.println("Altering collision byte");
-      Serial.print("Original byte: "); Serial.println(uidBuffer[collisionByte], BIN);
-      
       // We set the collided bit to 1b
       uidBuffer[collisionByte] |= 1 << (collisionBitWithinByte-1); 
-      
-      Serial.print("Altered byte: "); Serial.println(uidBuffer[collisionByte], BIN);
     }
 
-    byte backDataLen = 5;
+
+    int knownBytes = ((NVB & B11110000) >> 4) - 2;
+
+    const int expectedBackBytes = 5 - knownBytes;
+    
+    byte backData[expectedBackBytes] = {0};
+    byte backDataLen = expectedBackBytes;
     byte validReturnBits;
-    StatusCode commandStatus = sendSEL(cascadeCommand, NVB, uidBuffer, uidBuffer, &backDataLen, &validReturnBits);
-        
+
+    Serial.println("uidBuffer");
+    for(int i = 0 ; i < 5 ; i++) {
+      Serial.print(uidBuffer[i], BIN); Serial.print(" ");
+    }
+    Serial.println();
+    
+    StatusCode commandStatus = sendSEL(cascadeCommand, NVB, uidBuffer, backData, &backDataLen, &validReturnBits);
+
+    Serial.println("backData");
+    for(int i = 0 ; i < expectedBackBytes ; i++) {
+      Serial.print(backData[i], BIN); Serial.print(" ");
+    }
+    Serial.println();
+    
+    // sendSEL populates backData with the remaining Uid bits for CLn
+    // The following code will update uidBuffer with the new Uid bits while preserving the existing known bits
+    // This is effectively a Uid merge
+    for(int i = knownBytes ; i < 5 ; i++) {
+      if(i == knownBytes) {
+        byte mask = 0xFF << (NVB & B00001111);
+        uidBuffer[knownBytes] = (uidBuffer[knownBytes] & ~mask) | (backData[0] & mask);
+      } else {
+        uidBuffer[i] = backData[i - knownBytes];
+      }
+    }
+
+    Serial.println("uidBuffer post merge");
+    for(int i = 0 ; i < 5 ; i++) {
+      Serial.print(uidBuffer[i], BIN); Serial.print(" ");
+    }
+    Serial.println();
+
     collision = (commandStatus == STATUS_COLLISION);
 
     if(commandStatus != STATUS_COLLISION && commandStatus != STATUS_OK) {
