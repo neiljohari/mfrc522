@@ -127,11 +127,11 @@ void loop() {
       sprintf(uid,"%02X:%02X:%02X:%02X", serNum[0], serNum[1], serNum[2], serNum[3]);
       Serial.println("UID of card targeted: " + String(uid));
 
-      byte sak;
+      byte sak = 0;
       selectCard(serNum, sak);
 
       TagType cardType = getTagType(sak);
-      
+
       if(cardType == PICC_TYPE_MIFARE_1K) {
         Serial.println("Attempting Mifare Classic Operation (MIFARE Read)");
 
