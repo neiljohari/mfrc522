@@ -126,12 +126,17 @@ void loop() {
       char uid[11];
       sprintf(uid,"%02X:%02X:%02X:%02X", serNum[0], serNum[1], serNum[2], serNum[3]);
       Serial.println("UID of card targeted: " + String(uid));
+      // Serial.print("The BCC for the UID targeted is "); Serial.println(serNum[4], BIN);
 
       byte sak = 0;
-      selectCard(serNum, sak);
+      StatusCode selectStatus = selectCard(serNum, &sak);
 
       TagType cardType = getTagType(sak);
-
+      
+      if(selectStatus != STATUS_OK) {
+        Serial.print("selectCard failed. Error code "); Serial.println(selectStatus);
+      }
+      
       if(cardType == PICC_TYPE_MIFARE_1K) {
         Serial.println("Attempting Mifare Classic Operation (MIFARE Read)");
 
@@ -170,6 +175,7 @@ void loop() {
 
   stopEncryptedCommunication();
 
+  Serial.println();
   delay(2000);
 }
 
@@ -473,15 +479,14 @@ StatusCode executeDataCommand(byte cmd, byte successIrqFlag,
   //  b7 .  b6 .    b5 .     b4 .       b3 .    b2 .   b1 .      b0
   if(readReg(ErrorReg) & B00010011) // BufferOvfl, ParityErr, and ProtocolErr
     return STATUS_ERROR;
-
+  
   if (backData && backLen) {
     byte fifoByteCount = readReg(FIFOLevelReg); 
-
+    
     if (fifoByteCount > *backLen) 
       return STATUS_NO_ROOM;
-    
+      
     *backLen = fifoByteCount;
-
     readFIFOData(fifoByteCount, backData, rxAlign);
 
    
@@ -610,6 +615,7 @@ StatusCode sendSEL(byte cascadeCommand, byte nvb, byte *sendData, byte *backData
   uint8_t validBits = nvbBitCount; // Transmit only the number of bits specified by NVB in the last byte of sendUid
 
   clearLoggedCollisionBits();
+    
   StatusCode status = executeDataCommand(Transceive, B00110000, cmdFrame, cmdBufferSize, backData, backLen, &validBits, totalKnownBitsForCascadeLevel % 8);
   *validReturnBits = validBits;
   
@@ -632,7 +638,7 @@ StatusCode sendSEL(byte cascadeCommand, byte nvb, byte *sendData, byte *backData
 
     if(checksum != BCC) {
       Serial.println("FAILED CHECKSUM");
-      Serial.print("Got: "); Serial.print(checksum); Serial.print(", expected:"); Serial.println(BCC);
+      Serial.print("Got: "); Serial.print(checksum, BIN); Serial.print(", expected:"); Serial.println(BCC, BIN);
       return STATUS_ERROR;
     }
   }
@@ -673,8 +679,7 @@ StatusCode performAnticollision(byte cascadeCommand, byte *uidBuffer) {
   bool collision = false;
   uint8_t collisionPosition = 0; // This is the bit within this cascade level that a collision occurred
   byte NVB = 0x20; // Start off with minimum valid bits
-
-  Serial.println("\n performAnticollision() called");
+  
   do {
     if (collision) {
       Serial.println("**Collision detected. Attempting to resolve it.**");
@@ -711,21 +716,8 @@ StatusCode performAnticollision(byte cascadeCommand, byte *uidBuffer) {
     byte backData[expectedBackBytes] = {0};
     byte backDataLen = expectedBackBytes;
     byte validReturnBits;
-
-    Serial.println("uidBuffer");
-    for(int i = 0 ; i < 5 ; i++) {
-      Serial.print(uidBuffer[i], BIN); Serial.print(" ");
-    }
-    Serial.println();
-    
     StatusCode commandStatus = sendSEL(cascadeCommand, NVB, uidBuffer, backData, &backDataLen, &validReturnBits);
 
-    Serial.println("backData");
-    for(int i = 0 ; i < expectedBackBytes ; i++) {
-      Serial.print(backData[i], BIN); Serial.print(" ");
-    }
-    Serial.println();
-    
     // sendSEL populates backData with the remaining Uid bits for CLn
     // The following code will update uidBuffer with the new Uid bits while preserving the existing known bits
     // This is effectively a Uid merge
@@ -738,16 +730,9 @@ StatusCode performAnticollision(byte cascadeCommand, byte *uidBuffer) {
       }
     }
 
-    Serial.println("uidBuffer post merge");
-    for(int i = 0 ; i < 5 ; i++) {
-      Serial.print(uidBuffer[i], BIN); Serial.print(" ");
-    }
-    Serial.println();
-
     collision = (commandStatus == STATUS_COLLISION);
 
     if(commandStatus != STATUS_COLLISION && commandStatus != STATUS_OK) {
-      Serial.print("sendSEL did something unexpected! It returned status code: "); Serial.println(commandStatus);
       return commandStatus;
     }
     
@@ -760,7 +745,7 @@ StatusCode performAnticollision(byte cascadeCommand, byte *uidBuffer) {
 /*
  * Given a complete Uid, this function will transition a PICC in the READY state to ACTIVE state
  */
-StatusCode selectCard(byte *serialNumber, byte &SAK) {
+StatusCode selectCard(byte *serialNumber, byte *SAK) {
    byte validReturnBits = 0;
    uint8_t backLen = 3; // We expect the following bytes to come back: SAK (1 byte), CRC_A (2 bytes)
    byte backData[3]; // Allocate the byte array
@@ -768,11 +753,11 @@ StatusCode selectCard(byte *serialNumber, byte &SAK) {
    StatusCode status = sendSEL(PICC_SEL_CL1, 0x70, serialNumber, backData, &backLen, &validReturnBits);
    
    if(status == STATUS_OK && backLen == 3) {
-    SAK = backData[0];
+    *SAK = backData[0];
     // The SAK encodes a few states. See ISO/IEC 14443-3 6.4.3.4 Table 8 for coding of SAK
 
     // Here we are just checking to see if we have a full UID
-    if(SAK & B00000100) {
+    if(*SAK & B00000100) {
       Serial.println("Cascade bit set: UID not complete");
       return STATUS_INVALID;
     }
