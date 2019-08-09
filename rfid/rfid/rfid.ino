@@ -126,7 +126,7 @@ void loop() {
       char uid[11];
       sprintf(uid,"%02X:%02X:%02X:%02X", serNum[0], serNum[1], serNum[2], serNum[3]);
       Serial.println("UID of card targeted: " + String(uid));
-      // Serial.print("The BCC for the UID targeted is "); Serial.println(serNum[4], BIN);
+      Serial.print("The BCC for the UID targeted is "); Serial.println(serNum[4], BIN);
 
       byte sak = 0;
       StatusCode selectStatus = selectCard(serNum, &sak);
