@@ -626,10 +626,15 @@ StatusCode sendSEL(byte cascadeCommand, byte nvb, byte *sendData, byte *backData
   if(~collisions & B00100000) { // If b5 is logic 0, a collision was detected
     return STATUS_COLLISION;
   }
-  
+
   if(status == STATUS_OK && backLen && *backLen == 5) {
+    byte mask = 0xFF << nvbBitCount;
+    
     // "UID CLn check byte, calculated as exclusive-or over the 4 previous bytes, Type A" (ISO/IEC 1444-3 4)
-    byte byte0 = backData[0];
+    // The BCC is not recalculated for partially sent Uid bytes, so for byte0 we merge in the portion of the UID sent from cmdFrame
+    //    More info on this: cmdFrame index 0 and 1 are SEL and NVB, then the following indices are UID bytes. 1 + bytesForWholeUid gets the last byte with bits being sent.
+    //                       The mask takes only the bits actually being sent and merges it with bits from first Uid byte coming in
+    byte byte0 = (cmdFrame[1 + bytesForWholeUid] & ~mask) | (backData[0] & mask); 
     byte byte1 = backData[1];
     byte byte2 = backData[2];
     byte byte3 = backData[3];
