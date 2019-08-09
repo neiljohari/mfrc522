@@ -587,10 +587,11 @@ StatusCode sendSEL(byte cascadeCommand, byte nvb, byte *sendData, byte *backData
   const byte nvbBitCount = (nvb & B00001111);
   const byte totalKnownBitsForCascadeLevel = nvbByteCount * 8 + nvbBitCount;
 
-  // nvbByteCount accounts for SEL and NVB (so it is always >= 2) and also the integer part of all valid bits transmitted
-  //  additionally, if there are some bits in the last byte being sent, we'll need to allocate another byte
-  //  additionally, if we are sending the whole UID we will need another 2 bytes for the CRC_A
-  const byte cmdBufferSize = nvbByteCount + (nvbBitCount == 0 ? 0 : 1) + (nvb == 0x70 ? 2 : 0);
+  // We need 2 bytes for SEL and NVB
+  //  Then we need bytes for the whole UID. This is nvbByteCount and then an extra byte for any bits after the last whole byte.
+  //  additionally, if we are sending the whole UID we will need another 2 bytes for the CRC_A 
+  const byte bytesForWholeUid = (nvbByteCount - 2) + (nvbBitCount == 0 ? 0 : 1); // We subtract 2 because NVB accounts for SEL and NVB itself
+  const byte cmdBufferSize = 2 + bytesForWholeUid + (nvb == 0x70 ? 2 : 0);
 
   byte cmdFrame[cmdBufferSize]; 
   
@@ -598,7 +599,7 @@ StatusCode sendSEL(byte cascadeCommand, byte nvb, byte *sendData, byte *backData
   cmdFrame[1] = nvb; // NVB. See ISO/IEC 14443-3 6.4.3.3 for "Coding of NVB"
 
   // Send the known portion of the Uid
-  for(int i = 0 ; i < cmdBufferSize ; i++) {
+  for(int i = 0 ; i < bytesForWholeUid ; i++) {
     cmdFrame[i+2] = sendData[i];
   }
 
