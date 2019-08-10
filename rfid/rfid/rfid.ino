@@ -576,34 +576,36 @@ StatusCode sendHLTA() {
  *  - backLen: length in bytes of data returned
  *  - validReturnBits: number of valid bits in last byte returned
  */
-StatusCode sendSEL(byte cascadeCommand, byte nvb, byte *sendData, byte *backData, byte *backLen, byte *validReturnBits) {
+StatusCode sendSEL(byte cascadeCommand, byte NVB, byte *sendData, byte *backData, byte *backLen, byte *validReturnBits) {
 
   // NVB description:
   //  nvbByteCount: "The upper 4 bits are called “Byte count” and specify the integer part of the number of all valid data bits transmitted
   //   by the PCD (including SEL and NVB) divided by 8" (ISO/IEC 1444-3 6.4.3.3)
+  //   Note: b8 isn't used in NVB 
   //  nvbBitCount: "The lower 4 bits are called “bit count” and specify the number of all valid data bits transmitted by the PCD
   //   (including SEL and NVB) modulo 8."
-  const byte nvbByteCount = (nvb & B11110000) >> 4;
-  const byte nvbBitCount = (nvb & B00001111);
+  //   Note: b4 isn't used in NVB
+  const byte nvbByteCount = (NVB & B01110000) >> 4;
+  const byte nvbBitCount = (NVB & B00000111);
   const byte totalKnownBitsForCascadeLevel = nvbByteCount * 8 + nvbBitCount;
 
   // We need 2 bytes for SEL and NVB
   //  Then we need bytes for the whole UID. This is nvbByteCount and then an extra byte for any bits after the last whole byte.
   //  additionally, if we are sending the whole UID we will need another 2 bytes for the CRC_A 
   const byte bytesForWholeUid = (nvbByteCount - 2) + (nvbBitCount == 0 ? 0 : 1); // We subtract 2 because NVB accounts for SEL and NVB itself
-  const byte cmdBufferSize = 2 + bytesForWholeUid + (nvb == 0x70 ? 2 : 0);
+  const byte cmdBufferSize = 2 + bytesForWholeUid + (NVB == 0x70 ? 2 : 0); // TODO: try to make this max size
 
   byte cmdFrame[cmdBufferSize]; 
   
   cmdFrame[0] = cascadeCommand; // SEL command for corresponding cascade level
-  cmdFrame[1] = nvb; // NVB. See ISO/IEC 14443-3 6.4.3.3 for "Coding of NVB"
+  cmdFrame[1] = NVB; // NVB. See ISO/IEC 14443-3 6.4.3.3 for "Coding of NVB"
 
   // Send the known portion of the Uid
   for(int i = 0 ; i < bytesForWholeUid ; i++) {
     cmdFrame[i+2] = sendData[i];
   }
 
-  if(nvb == 0x70) {
+  if(NVB == 0x70) {
    uint8_t crcDataSize = cmdBufferSize - 2;
    // A CRC is computed for all data bits currently in the frame
    // The result is stored in the last 2 bytes in our command frame
@@ -703,7 +705,7 @@ StatusCode performAnticollision(byte cascadeCommand, byte *uidBuffer) {
       // There are 4 UID bytes for a given cascade level. Since integral division is truncation, this gives us a zero-indexed 
       //  number representing the whole number of bytes needed to represent this collision
       byte collisionByte = collisionPosition / 8; 
-      // This is the actual bit within the above specified byte that has collided
+      // This is the actual bit within the above specified byte that has collided, it is one-indexed
       byte collisionBitWithinByte = collisionPosition % 8; 
   
       // Now we craft an NVB code using ISO/IEC 14443-3 6.4.3.3 Table 7
@@ -715,7 +717,7 @@ StatusCode performAnticollision(byte cascadeCommand, byte *uidBuffer) {
     }
 
 
-    int knownBytes = ((NVB & B11110000) >> 4) - 2;
+    int knownBytes = ((NVB & B11110000) >> 4) - 2; // Subtract out 2 bytes, one for SEL and one for NVB
 
     const int expectedBackBytes = 5 - knownBytes;
     
