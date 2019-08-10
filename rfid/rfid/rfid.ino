@@ -592,11 +592,12 @@ StatusCode sendSEL(byte cascadeCommand, byte NVB, byte *sendData, byte *backData
   // We need 2 bytes for SEL and NVB
   //  Then we need bytes for the whole UID. This is nvbByteCount and then an extra byte for any bits after the last whole byte.
   //  additionally, if we are sending the whole UID we will need another 2 bytes for the CRC_A 
-  const byte bytesForWholeUid = (nvbByteCount - 2) + (nvbBitCount == 0 ? 0 : 1); // We subtract 2 because NVB accounts for SEL and NVB itself
-  const byte cmdBufferSize = 2 + bytesForWholeUid + (NVB == 0x70 ? 2 : 0); // TODO: try to make this max size
-
-  byte cmdFrame[cmdBufferSize]; 
+  const uint8_t bytesForWholeUid = (nvbByteCount - 2) + (nvbBitCount == 0 ? 0 : 1); // We subtract 2 because NVB accounts for SEL and NVB itself
+  const uint8_t cmdBufferSize = 2 + bytesForWholeUid + (NVB == 0x70 ? 2 : 0); 
   
+  // The buffer can be at most 9 bytes long: SEL (1) + NVB (1) + UID (1-4) + BCC (0-1) + CRC_A (2)
+  // Not all of this will always be used though depending on UID length
+  byte cmdFrame[9]; 
   cmdFrame[0] = cascadeCommand; // SEL command for corresponding cascade level
   cmdFrame[1] = NVB; // NVB. See ISO/IEC 14443-3 6.4.3.3 for "Coding of NVB"
 
@@ -718,11 +719,9 @@ StatusCode performAnticollision(byte cascadeCommand, byte *uidBuffer) {
 
 
     int knownBytes = ((NVB & B11110000) >> 4) - 2; // Subtract out 2 bytes, one for SEL and one for NVB
-
-    const int expectedBackBytes = 5 - knownBytes;
-    
-    byte backData[expectedBackBytes] = {0};
-    byte backDataLen = expectedBackBytes;
+      
+    byte backData[5] = {0}; // backData can be at most 5 bytes long, but we might not use all of this allocated memory
+    byte backDataLen = 5 - knownBytes;
     byte validReturnBits;
     StatusCode commandStatus = sendSEL(cascadeCommand, NVB, uidBuffer, backData, &backDataLen, &validReturnBits);
 
