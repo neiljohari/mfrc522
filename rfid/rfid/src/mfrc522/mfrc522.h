@@ -66,23 +66,6 @@ enum StatusCode : byte {
 };
 
 
-enum TagCommand : byte {
-  PICC_CMD_REQA       = 0x26, // REQuest command, Type A. Invites PICCs in state IDLE to go to READY and prepare for anticollision or selection. 7 bit frame.
-  PICC_SEL_CL1        = 0x93, // SEL command for cascade level 1
-  PICC_CMD_HLTA       = 0x50, // HALT command, Type A.
-  // MF prefix means Mifare Classic Operation Command. See MF1S50YYX_V1 Document by NXP for more details.
-  PICC_MF_AUTH_KEY_A  = 0x60, // Authenticate access to the block that follows with Key A
-  PICC_MF_AUTH_KEY_B  = 0x61, // Authenticate access to the block that follows with Key B
-  PICC_MF_READ        = 0x30, // Reads a block of an authenticated sector
-};
-
-enum TagType : byte {
-    PICC_TYPE_UNKNOWN,
-    PICC_TYPE_ISO_14443_4, // PICC compliant with ISO/IEC 14443-4  
-    PICC_TYPE_MIFARE_1K, // MIFARE Classic protocol, 1KB 
-};
-
-
 class MFRC522 {
     public: 
         MFRC522();
@@ -105,10 +88,6 @@ class MFRC522 {
         StatusCode executeDataCommand(byte cmd, byte successIrqFlag, 
                 byte *sendData, byte sendLen, byte *backData, 
                 byte *backLen, byte *validBitsInLastByte, byte rxAlign);
-
-        
-
-    private:
 };
 
 #endif

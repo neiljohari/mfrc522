@@ -4,7 +4,12 @@
 #include "mfrc522.h"
 
 class MFRC522;
-enum TagType : byte;
+
+enum TagType : byte {
+    PICC_TYPE_UNKNOWN,
+    PICC_TYPE_ISO_14443_4, // PICC compliant with ISO/IEC 14443-4  
+    PICC_TYPE_MIFARE_1K, // MIFARE Classic protocol, 1KB 
+};
 
 class Utils {
     public:
