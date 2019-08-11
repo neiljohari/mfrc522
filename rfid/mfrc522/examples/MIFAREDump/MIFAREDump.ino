@@ -1,5 +1,5 @@
 #include <SPI.h>
-#include "src/mfrc522/sensor.h"
+#include <mfrc522.h>
 
 using namespace MFRC522;
 
