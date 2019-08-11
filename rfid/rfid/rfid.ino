@@ -1,7 +1,9 @@
 #include <SPI.h>
-#include "src/mfrc522/mfrc522.h"
+#include "src/mfrc522/sensor.h"
 
-MFRC522 mfrc522;  // Create MFRC522 instance
+using namespace MFRC522;
+
+MFRC522::Sensor mfrc522;  // Create MFRC522 instance
 
 void setup() {
   Serial.begin(9600);

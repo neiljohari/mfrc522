@@ -1,5 +1,5 @@
-#ifndef MFRC522_h
-#define MFRC522_h
+#ifndef Sensor_h
+#define Sensor_h
 
 #include <Arduino.h>
 #include <SPI.h>
@@ -8,8 +8,9 @@
 #include "utils.h"
 
 
+namespace MFRC522 {
 
-enum MFRC522Register : byte {
+enum Register : byte {
   // 8.1.2.3 "The MSB of the first byte defines the mode used."
   // 8.1.2.3 "LSB is set to logic 0."
   // Thus, the address bits must be within bits 6 to 0, so we shift everything
@@ -38,7 +39,7 @@ enum MFRC522Register : byte {
   VersionReg      = 0x37 << 1, // 9.3.4.8  | Returns software version
 };
 
-enum MFRC522Command : byte { 
+enum PCDCommand : byte { 
   // 10.3
   Idle            = B00000000, // 10.3.1.1  | Puts into Idle mode, halting all currently running commands.
   CalcCRC_A        = B00000011, // 10.3.1.4  | Actives the CRC co-processor
@@ -50,7 +51,6 @@ enum MFRC522Command : byte {
                                //             If RxModeReg.RxMultiple = 1 then transcieve doesn't leave receive state.
   MFAuthent       = B00001110, // 10.3.1.9  | Manages 3 pass authentication with Mifare cards.
   SoftReset       = B00001111, // 10.3.1.10 | Resets the MFRC522. Command automatically terminates. All registers are reset, internal memory unchanged.
-  
 };
 
 enum StatusCode : byte {
@@ -66,9 +66,9 @@ enum StatusCode : byte {
 };
 
 
-class MFRC522 {
+class Sensor {
     public: 
-        MFRC522();
+        Sensor();
         void initReader();
 
         void writeReg(byte addr, byte val);
@@ -85,9 +85,10 @@ class MFRC522 {
         void stopEncryptedCommunication();
 
         StatusCode calculateCRC_A(byte *data, byte dataLen, byte *result);
-        StatusCode executeDataCommand(byte cmd, byte successIrqFlag, 
+        StatusCode executeDataCommand(PCDCommand cmd, byte successIrqFlag, 
                 byte *sendData, byte sendLen, byte *backData, 
                 byte *backLen, byte *validBitsInLastByte, byte rxAlign);
 };
 
+}
 #endif

@@ -1,10 +1,12 @@
 #include "utils.h"
 
+namespace MFRC522 {
+
 /*
  * Alters a register's value such that the values selected in the mask are turned
  * off 
  */
-void Utils::clearRegBitMask(MFRC522* mfrc522, byte addr, byte mask) {
+void Utils::clearRegBitMask(Sensor* mfrc522, byte addr, byte mask) {
     mfrc522->writeReg(addr, mfrc522->readReg(addr) & (~mask));
 }
 
@@ -12,11 +14,11 @@ void Utils::clearRegBitMask(MFRC522* mfrc522, byte addr, byte mask) {
  * Alters a register's value such that the values selected in the mask are turned
  * on 
  */
-void Utils::setRegBitMask(MFRC522* mfrc522, byte addr, byte mask) {
+void Utils::setRegBitMask(Sensor* mfrc522, byte addr, byte mask) {
     mfrc522->writeReg(addr, mfrc522->readReg(addr) | mask);
 }
 
-bool Utils::isNewCardPresent(MFRC522* mfrc522) {
+bool Utils::isNewCardPresent(Sensor* mfrc522) {
   byte bufferATQA[2];
   byte bufferSize = sizeof(bufferATQA);
   
@@ -42,4 +44,6 @@ TagType Utils::getTagType(byte SAK) {
       return PICC_TYPE_MIFARE_1K;
   } 
   return PICC_TYPE_UNKNOWN;
+}
+
 }

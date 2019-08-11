@@ -1,10 +1,12 @@
-#include "mfrc522.h"
+#include "sensor.h"
+
+namespace MFRC522 {
 
 const SPISettings SPI_CONFIG(10000000, MSBFIRST, SPI_MODE0);
 
-MFRC522::MFRC522() {}
+Sensor::Sensor() {}
 
-void MFRC522::initReader() {
+void Sensor::initReader() {
   pinMode(SS, OUTPUT); // SS defined in pins_arduino.h
   digitalWrite(SS, HIGH);
 
@@ -49,7 +51,7 @@ void MFRC522::initReader() {
   enableAntennas(); // Antennas are disabled by a soft reset
 }
 
-void MFRC522::writeReg(byte addr, byte val) {
+void Sensor::writeReg(byte addr, byte val) {
   // The MFRC522 follows the most common SPI communication pattern
   // Thus, we can follow https://www.arduino.cc/en/Reference/SPI
   SPI.beginTransaction(SPI_CONFIG);
@@ -72,7 +74,7 @@ void MFRC522::writeReg(byte addr, byte val) {
   SPI.endTransaction();
 }
 
-byte MFRC522::readReg(byte addr) {
+byte Sensor::readReg(byte addr) {
   // The MFRC522 follows the most common SPI communication pattern
   // Thus, we can follow https://www.arduino.cc/en/Reference/SPI
   SPI.beginTransaction(SPI_CONFIG);
@@ -101,7 +103,7 @@ byte MFRC522::readReg(byte addr) {
 * byte the data begins being written from. The other bits are preserved.
 */
 
-void MFRC522::readFIFOData(uint8_t numBytes, byte *backData, byte rxAlign) {
+void Sensor::readFIFOData(uint8_t numBytes, byte *backData, byte rxAlign) {
   // The MFRC522 follows the most common SPI communication pattern
   // Thus, we can follow https://www.arduino.cc/en/Reference/SPI
   SPI.beginTransaction(SPI_CONFIG);
@@ -132,13 +134,13 @@ void MFRC522::readFIFOData(uint8_t numBytes, byte *backData, byte rxAlign) {
 }
 
 
-void MFRC522::enableAntennas() {
+void Sensor::enableAntennas() {
   // Table 62 under 9.3.2.5: Last two bits control whether the antenna driver
   //  pins (TX1 and TX2) are on or off
   Utils::setRegBitMask(this, TxControlReg, B11);
 }
 
-void MFRC522::disableAntennas() {
+void Sensor::disableAntennas() {
   // Table 62 under 9.3.2.5: Last two bits control whether the antenna driver
   //  pins (TX1 and TX2) are on or off
     Utils::clearRegBitMask(this, TxControlReg, B11);
@@ -146,26 +148,26 @@ void MFRC522::disableAntennas() {
 
 
 
-void MFRC522::softReset() {
+void Sensor::softReset() {
   writeReg(CommandReg, SoftReset);
   delay(150); // Give plenty of time for oscillator to boot up 
 }
 
 
-void MFRC522::flushFIFOBuffer() {
+void Sensor::flushFIFOBuffer() {
     Utils::setRegBitMask(this, FIFOLevelReg, B10000000);
 }
 
-void MFRC522::clearMarkedIRQBits() {
+void Sensor::clearMarkedIRQBits() {
     Utils::clearRegBitMask(this, ComIrqReg, B10000000);
 }
 
-void MFRC522::clearLoggedCollisionBits() {
+void Sensor::clearLoggedCollisionBits() {
     Utils::clearRegBitMask(this, CollReg, B10000000); 
 }
 
 // Stops Crypto1 used for Mifare protocol
-void MFRC522::stopEncryptedCommunication() {
+void Sensor::stopEncryptedCommunication() {
     Utils::clearRegBitMask(this, Status2Reg, B00001000);
 }
 
@@ -175,7 +177,7 @@ void MFRC522::stopEncryptedCommunication() {
  * This function takes in up to 64 bytes of data (size of the FIFO buffer), computes the checksum, and returns it in the result byte array.
  * Note: the result of this function is 2 bytes, so the result byte pointer should allocate at least 2 bytes. 
  */
-StatusCode MFRC522::calculateCRC_A(byte *data, byte dataLen, byte *result) {
+StatusCode Sensor::calculateCRC_A(byte *data, byte dataLen, byte *result) {
   writeReg(CommandReg, Idle); // Idle halts any currently running commands
   writeReg(DivIrqReg, B00000100); // First bit indicates we want to clear marked bit, marked bit is CRC interrupt
   flushFIFOBuffer();
@@ -210,7 +212,7 @@ StatusCode MFRC522::calculateCRC_A(byte *data, byte dataLen, byte *result) {
  * Transfers data to FIFO buffer, executes command, and returns data back from
  * the buffer. 
  */
-StatusCode MFRC522::executeDataCommand(byte cmd, byte successIrqFlag, 
+StatusCode Sensor::executeDataCommand(PCDCommand cmd, byte successIrqFlag, 
                               byte *sendData, byte sendLen, byte *backData, 
                               byte *backLen, byte *validBitsInLastByte, byte rxAlign) { 
   writeReg(CommandReg, Idle); // Idle halts any currently running commands
@@ -301,4 +303,6 @@ StatusCode MFRC522::executeDataCommand(byte cmd, byte successIrqFlag,
     
   
   return STATUS_OK;
+}
+
 }

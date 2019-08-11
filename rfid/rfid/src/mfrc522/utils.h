@@ -1,9 +1,11 @@
 #ifndef Utils_h
 #define Utils_h
 
-#include "mfrc522.h"
+#include "sensor.h"
 
-class MFRC522;
+namespace MFRC522 {
+
+class Sensor;
 
 enum TagType : byte {
     PICC_TYPE_UNKNOWN,
@@ -13,10 +15,12 @@ enum TagType : byte {
 
 class Utils {
     public:
-        static void clearRegBitMask(MFRC522* mfrc522, byte addr, byte mask);
-        static void setRegBitMask(MFRC522* mfrc522, byte addr, byte mask);
-        static bool isNewCardPresent(MFRC522* mfrc522);
+        static void clearRegBitMask(Sensor* mfrc522, byte addr, byte mask);
+        static void setRegBitMask(Sensor* mfrc522, byte addr, byte mask);
+        static bool isNewCardPresent(Sensor* mfrc522);
         static TagType getTagType(byte SAK);
 };
+
+}
 
 #endif

@@ -1,6 +1,7 @@
 #include "iso14443_3.h"
 
-StatusCode ISO14443_3::sendREQA(MFRC522* mfrc522, byte *bufferATQA, byte *bufferSize) {
+namespace MFRC522 {
+StatusCode ISO14443_3::sendREQA(Sensor* mfrc522, byte *bufferATQA, byte *bufferSize) {
   // The ATQA response is 2 bytes long
   if (bufferATQA == nullptr || *bufferSize < 2) 
     return STATUS_NO_ROOM;
@@ -23,7 +24,7 @@ StatusCode ISO14443_3::sendREQA(MFRC522* mfrc522, byte *bufferATQA, byte *buffer
   return STATUS_OK;
 }
 
-StatusCode ISO14443_3::sendHLTA(MFRC522* mfrc522) {
+StatusCode ISO14443_3::sendHLTA(Sensor* mfrc522) {
   // "The HLTA Command consists of two bytes followed by CRC_A and shall be transmitted within Standard Frame." (ISO/IEC 14443-3 6.3.3)
   byte cmdFrame[4];
   cmdFrame[0] = PICC_CMD_HLTA;
@@ -67,7 +68,7 @@ StatusCode ISO14443_3::sendHLTA(MFRC522* mfrc522) {
  *  - backLen: length in bytes of data returned
  *  - validReturnBits: number of valid bits in last byte returned
  */
-StatusCode ISO14443_3::sendSEL(MFRC522* mfrc522, byte cascadeCommand, byte NVB, byte *sendData, byte *backData, byte *backLen, byte *validReturnBits) {
+StatusCode ISO14443_3::sendSEL(Sensor* mfrc522, byte cascadeCommand, byte NVB, byte *sendData, byte *backData, byte *backLen, byte *validReturnBits) {
 
   // NVB description:
   //  nvbByteCount: "The upper 4 bits are called “Byte count” and specify the integer part of the number of all valid data bits transmitted
@@ -148,7 +149,7 @@ StatusCode ISO14443_3::sendSEL(MFRC522* mfrc522, byte cascadeCommand, byte NVB, 
 }
 
 
-StatusCode ISO14443_3::performAnticollision(MFRC522* mfrc522, byte cascadeCommand, byte *uidBuffer) {
+StatusCode ISO14443_3::performAnticollision(Sensor* mfrc522, byte cascadeCommand, byte *uidBuffer) {
   bool collision = false;
   uint8_t collisionPosition = 0; // This is the bit within this cascade level that a collision occurred
   byte NVB = 0x20; // Start off with minimum valid bits
@@ -216,7 +217,7 @@ StatusCode ISO14443_3::performAnticollision(MFRC522* mfrc522, byte cascadeComman
 /*
  * Given a complete Uid, this function will transition a PICC in the READY state to ACTIVE state
  */
-StatusCode ISO14443_3::selectCard(MFRC522* mfrc522, byte *serialNumber, byte *SAK) {
+StatusCode ISO14443_3::selectCard(Sensor* mfrc522, byte *serialNumber, byte *SAK) {
    byte validReturnBits = 0;
    uint8_t backLen = 3; // We expect the following bytes to come back: SAK (1 byte), CRC_A (2 bytes)
    byte backData[3]; // Allocate the byte array
@@ -235,4 +236,6 @@ StatusCode ISO14443_3::selectCard(MFRC522* mfrc522, byte *serialNumber, byte *SA
    }
 
    return STATUS_OK;
+}
+
 }

@@ -1,5 +1,6 @@
 #include "mifare.h"
 
+namespace MFRC522 {
 
 /*
  * Executes the MFRC522's MFAuthent command
@@ -9,7 +10,7 @@
  * sectorKey must be 5 bytes long
  * serNum must be 4 bytes long
  */
-StatusCode MIFARE::mifareAuthenticate(MFRC522* mfrc522, TagCommand authType, byte blockAddr, byte *sectorKey, byte *serNum) {
+StatusCode MIFARE::mifareAuthenticate(Sensor* mfrc522, TagCommand authType, byte blockAddr, byte *sectorKey, byte *serNum) {
   byte cmdFrame[12];
  
   cmdFrame[0] = authType;
@@ -47,7 +48,7 @@ StatusCode MIFARE::mifareAuthenticate(MFRC522* mfrc522, TagCommand authType, byt
  * data should be an array of size at least 18 elements; this is where the block's data will be stored
  * dataSize is the amount of the array populated
  */
-StatusCode MIFARE::mifareRead(MFRC522* mfrc522, byte blockAddr, byte *data, byte *dataSize) {
+StatusCode MIFARE::mifareRead(Sensor* mfrc522, byte blockAddr, byte *data, byte *dataSize) {
   if (data == nullptr || *dataSize < 18) 
     return STATUS_NO_ROOM;
 
@@ -63,4 +64,6 @@ StatusCode MIFARE::mifareRead(MFRC522* mfrc522, byte blockAddr, byte *data, byte
     return crcStatus;  
     
   return mfrc522->executeDataCommand(Transceive, B00110000, cmdFrame, 4, data, dataSize, nullptr, 0);
+}
+
 }
