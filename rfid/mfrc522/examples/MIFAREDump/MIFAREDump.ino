@@ -1,6 +1,4 @@
-#include <SPI.h>
 #include <mfrc522.h>
-
 using namespace MFRC522;
 
 MFRC522::Sensor mfrc522;  // Create MFRC522 instance
