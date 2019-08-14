@@ -23,9 +23,9 @@ void loop() {
       StatusCode selectStatus = ISO14443_3::selectCard(&mfrc522, serNum, &sak);
 
       if(selectStatus == STATUS_OK) {
-        Serial.print("Card was successfully selected.");
+        Serial.println("Card was successfully selected.");
       }
     }
   }
-  delay(2000);  
+  delay(1000);  
 }
